@@ -38,37 +38,63 @@ const NATIONWIDE_CITIES: City[] = [
   { id: 'loc-qta', name: 'Quetta', province: 'Balochistan' },
 ];
 
-export interface AppUser {
+export type VerificationState = 'UNVERIFIED' | 'PENDING_REVIEW' | 'VERIFIED';
+
+export interface AppUserProfile {
   id: string;
   name: string;
   phone: string;
   role: 'PASSENGER' | 'DRIVER';
+  avatarUrl?: string;
+  city?: string;
+  emergencyContact?: string;
+  // Driver specific fields
   vehicle?: {
     makeModel: string;
     plate: string;
     capacity: number;
     hasAc: boolean;
+    color: string;
   };
+  cnicNumber?: string;
+  licenseNumber?: string;
+  verificationStatus?: VerificationState;
+  idDocumentUploaded?: boolean;
+  licenseDocumentUploaded?: boolean;
+  vehicleRegistrationUploaded?: boolean;
 }
 
-const DEFAULT_PASSENGER: AppUser = {
+const INITIAL_DEMO_PASSENGER: AppUserProfile = {
   id: 'usr-ali',
   name: 'Muhammad Ali',
   phone: '0301-2345678',
   role: 'PASSENGER',
+  avatarUrl: '👨‍💼',
+  city: 'Karachi',
+  emergencyContact: '0300-1122334',
 };
 
-const DEFAULT_DRIVER: AppUser = {
+const INITIAL_DEMO_DRIVER: AppUserProfile = {
   id: 'driver-tariq',
   name: 'Tariq Khan',
   phone: '0300-9876543',
   role: 'DRIVER',
+  avatarUrl: '👨‍✈️',
+  city: 'Umerkot',
+  emergencyContact: '0302-9988776',
   vehicle: {
-    makeModel: 'Toyota Corolla (AC)',
+    makeModel: 'Toyota Corolla GLi',
     plate: 'LEB-4592',
     capacity: 4,
     hasAc: true,
+    color: 'White',
   },
+  cnicNumber: '44101-1234567-1',
+  licenseNumber: 'DL-HYD-99812',
+  verificationStatus: 'VERIFIED',
+  idDocumentUploaded: true,
+  licenseDocumentUploaded: true,
+  vehicleRegistrationUploaded: true,
 };
 
 const INITIAL_RIDES: Ride[] = [
@@ -183,36 +209,40 @@ const INITIAL_RIDES: Ride[] = [
 ];
 
 export default function Home() {
-  // Current logged in user
-  const [currentUser, setCurrentUser] = useState<AppUser>(DEFAULT_PASSENGER);
-  const [showAuthModal, setShowAuthModal] = useState(false);
-  const [authRoleChoice, setAuthRoleChoice] = useState<'PASSENGER' | 'DRIVER'>('PASSENGER');
+  // Session & Auth state (null = not logged in, requires registration/login)
+  const [currentUser, setCurrentUser] = useState<AppUserProfile | null>(null);
+  const [isClientLoaded, setIsClientLoaded] = useState(false);
 
-  // Registration form fields
+  // Auth screen state
+  const [authView, setAuthView] = useState<'REGISTER' | 'LOGIN'>('REGISTER');
+  const [authRoleChoice, setAuthRoleChoice] = useState<'PASSENGER' | 'DRIVER'>('PASSENGER');
   const [regName, setRegName] = useState('');
   const [regPhone, setRegPhone] = useState('');
+  const [regCity, setRegCity] = useState('Karachi');
+  const [regEmergency, setRegEmergency] = useState('');
   const [regCarModel, setRegCarModel] = useState('Toyota Corolla (AC)');
-  const [regCarPlate, setRegCarPlate] = useState('LEB-1234');
+  const [regCarPlate, setRegCarPlate] = useState('LEB-4592');
   const [regCarCapacity, setRegCarCapacity] = useState(4);
+  const [regCarColor, setRegCarColor] = useState('White');
   const [regCarAc, setRegCarAc] = useState(true);
+  const [regCnic, setRegCnic] = useState('');
+  const [regLicense, setRegLicense] = useState('');
+  const [loginPhone, setLoginPhone] = useState('');
 
-  // App Navigation: passenger, all_listings, or driver view
-  const [activeTab, setActiveTab] = useState<'passenger' | 'all_listings' | 'driver'>('passenger');
+  // App Tabs: 'passenger' | 'all_listings' | 'driver' | 'profile'
+  const [activeTab, setActiveTab] = useState<'passenger' | 'all_listings' | 'driver' | 'profile'>('passenger');
 
-  // "Where To?" Quick Prompt Popup for Passengers (Appears on open / after registration)
-  const [showQuickRouteModal, setShowQuickRouteModal] = useState(true);
+  // "Where To?" Quick Route Popup for Passengers
+  const [showQuickRouteModal, setShowQuickRouteModal] = useState(false);
 
   // Main Rides & Bookings State
   const [rides, setRides] = useState<Ride[]>(INITIAL_RIDES);
   const [selectedRideId, setSelectedRideId] = useState<string>('ride-101');
   const [bookings, setBookings] = useState<BookingRequest[]>([]);
-  const [isClientLoaded, setIsClientLoaded] = useState(false);
 
   // Passenger Search State
   const [searchOrigin, setSearchOrigin] = useState<string>('loc-uk');
   const [searchDest, setSearchDest] = useState<string>('loc-khi');
-
-  // Passenger Booking Selection
   const [bookingType, setBookingType] = useState<BookingType>('WHOLE_CAR');
   const [seatsRequested, setSeatsRequested] = useState(1);
 
@@ -228,10 +258,8 @@ export default function Home() {
   const [driverPostMode, setDriverPostMode] = useState<RideBookingMode>('WHOLE_CAR_OR_SEATS');
   const [driverPostCarPrice, setDriverPostCarPrice] = useState<number>(14000);
   const [driverPostSeatPrice, setDriverPostSeatPrice] = useState<number>(3500);
-  const [driverPostCapacity, setDriverPostCapacity] = useState<number>(4);
-  const [driverPostCarModel, setDriverPostCarModel] = useState<string>('Toyota Corolla (AC)');
   const [driverPostTime, setDriverPostTime] = useState<string>('07:00 AM');
-  const [driverPostNotes, setDriverPostNotes] = useState<string>('Clean AC vehicle. Trunk luggage space.');
+  const [driverPostNotes, setDriverPostNotes] = useState<string>('Clean AC car with luggage trunk.');
 
   // Notification Toast
   const [notification, setNotification] = useState<{
@@ -241,16 +269,22 @@ export default function Home() {
   } | null>({
     type: 'info',
     title: 'ReturnRide Pakistan',
-    message: 'Welcome! Search nationwide rides or switch to the Driver tab to publish your journey.',
+    message: 'Welcome to ReturnRide. Safe intercity ride sharing nationwide.',
   });
 
-  // Load from localStorage
+  // Load state from localStorage on client mount
   useEffect(() => {
     try {
       const savedUser = localStorage.getItem('returnride_user');
       const savedRides = localStorage.getItem('returnride_rides');
       const savedBookings = localStorage.getItem('returnride_bookings');
-      if (savedUser) setCurrentUser(JSON.parse(savedUser));
+      if (savedUser) {
+        const parsedUser = JSON.parse(savedUser);
+        setCurrentUser(parsedUser);
+        if (parsedUser.role === 'PASSENGER') {
+          setShowQuickRouteModal(true);
+        }
+      }
       if (savedRides) setRides(JSON.parse(savedRides));
       if (savedBookings) setBookings(JSON.parse(savedBookings));
     } catch {
@@ -259,11 +293,15 @@ export default function Home() {
     setIsClientLoaded(true);
   }, []);
 
-  // Save to localStorage
+  // Save state to localStorage
   useEffect(() => {
     if (!isClientLoaded) return;
     try {
-      localStorage.setItem('returnride_user', JSON.stringify(currentUser));
+      if (currentUser) {
+        localStorage.setItem('returnride_user', JSON.stringify(currentUser));
+      } else {
+        localStorage.removeItem('returnride_user');
+      }
       localStorage.setItem('returnride_rides', JSON.stringify(rides));
       localStorage.setItem('returnride_bookings', JSON.stringify(bookings));
     } catch {
@@ -271,19 +309,27 @@ export default function Home() {
     }
   }, [currentUser, rides, bookings, isClientLoaded]);
 
-  // Handle User Registration / Login
-  const handleAuthSubmit = (e: React.FormEvent) => {
+  // Handle Registration
+  const handleRegister = (e: React.FormEvent) => {
     e.preventDefault();
     if (!regName.trim() || !regPhone.trim()) {
-      alert('Please enter your Name and Mobile Number.');
+      alert('Please provide your Full Name and Mobile Number.');
       return;
     }
 
-    const newUser: AppUser = {
+    if (authRoleChoice === 'DRIVER' && (!regCnic.trim() || !regLicense.trim())) {
+      alert('For security in Pakistan, drivers must provide CNIC and Driving License numbers.');
+      return;
+    }
+
+    const newUser: AppUserProfile = {
       id: `usr-${Date.now().toString().slice(-4)}`,
       name: regName.trim(),
       phone: regPhone.trim(),
       role: authRoleChoice,
+      avatarUrl: authRoleChoice === 'DRIVER' ? '👨‍✈️' : '🧑',
+      city: regCity,
+      emergencyContact: regEmergency || '0300-1234567',
       vehicle:
         authRoleChoice === 'DRIVER'
           ? {
@@ -291,75 +337,126 @@ export default function Home() {
               plate: regCarPlate,
               capacity: regCarCapacity,
               hasAc: regCarAc,
+              color: regCarColor,
             }
           : undefined,
+      cnicNumber: authRoleChoice === 'DRIVER' ? regCnic.trim() : undefined,
+      licenseNumber: authRoleChoice === 'DRIVER' ? regLicense.trim() : undefined,
+      verificationStatus: authRoleChoice === 'DRIVER' ? 'PENDING_REVIEW' : undefined,
+      idDocumentUploaded: authRoleChoice === 'DRIVER' ? true : false,
+      licenseDocumentUploaded: authRoleChoice === 'DRIVER' ? true : false,
+      vehicleRegistrationUploaded: authRoleChoice === 'DRIVER' ? true : false,
     };
 
     setCurrentUser(newUser);
-    setShowAuthModal(false);
 
     if (authRoleChoice === 'PASSENGER') {
       setActiveTab('passenger');
-      setShowQuickRouteModal(true); // Open "From & To" popup immediately
+      setShowQuickRouteModal(true); // Immediate "From/To" popup!
       setNotification({
         type: 'success',
         title: 'Welcome, ' + newUser.name + '!',
-        message: 'Where do you want to travel today? Select your departure and arrival cities.',
+        message: 'Where do you want to travel? Choose your departure and destination.',
       });
     } else {
       setActiveTab('driver');
-      setDriverPostCarModel(newUser.vehicle?.makeModel || 'Toyota Corolla');
-      setDriverPostCapacity(newUser.vehicle?.capacity || 4);
       setNotification({
-        type: 'success',
-        title: 'Driver Account Ready!',
-        message: 'Welcome Captain ' + newUser.name + '. You can now publish rides and accept passengers.',
+        type: 'info',
+        title: 'Driver Account Created',
+        message: 'Your documents have been submitted for verification. You can now list rides.',
       });
     }
   };
 
-  // Quick switch for demo testing
-  const handleQuickSwitchRole = (role: 'PASSENGER' | 'DRIVER') => {
-    if (role === 'PASSENGER') {
-      setCurrentUser(DEFAULT_PASSENGER);
+  // Handle Login
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!loginPhone.trim()) {
+      alert('Please enter your registered mobile number.');
+      return;
+    }
+
+    // Check if matching driver or passenger
+    const isDriverPhone = loginPhone.includes('9876') || loginPhone.includes('driver');
+    const userToLogin: AppUserProfile = isDriverPhone
+      ? INITIAL_DEMO_DRIVER
+      : {
+          ...INITIAL_DEMO_PASSENGER,
+          phone: loginPhone,
+        };
+
+    setCurrentUser(userToLogin);
+
+    if (userToLogin.role === 'PASSENGER') {
       setActiveTab('passenger');
       setShowQuickRouteModal(true);
     } else {
-      setCurrentUser(DEFAULT_DRIVER);
       setActiveTab('driver');
-      setDriverPostCarModel(DEFAULT_DRIVER.vehicle?.makeModel || 'Toyota Corolla (AC)');
-      setDriverPostCapacity(DEFAULT_DRIVER.vehicle?.capacity || 4);
+    }
+
+    setNotification({
+      type: 'success',
+      title: 'Welcome Back, ' + userToLogin.name + '!',
+      message: 'You are now signed in as a ' + userToLogin.role.toLowerCase() + '.',
+    });
+  };
+
+  // Quick 1-tap demo logins
+  const handleDemoLogin = (role: 'PASSENGER' | 'DRIVER') => {
+    if (role === 'PASSENGER') {
+      setCurrentUser(INITIAL_DEMO_PASSENGER);
+      setActiveTab('passenger');
+      setShowQuickRouteModal(true);
+      setNotification({
+        type: 'success',
+        title: 'Demo Passenger Active',
+        message: 'Signed in as Muhammad Ali (Karachi).',
+      });
+    } else {
+      setCurrentUser(INITIAL_DEMO_DRIVER);
+      setActiveTab('driver');
+      setNotification({
+        type: 'success',
+        title: 'Demo Driver Active',
+        message: 'Signed in as Captain Tariq Khan (Toyota Corolla AC, Verified).',
+      });
     }
   };
 
-  // Passenger Quick "From & To" Popup Handler
+  // Log out
+  const handleLogout = () => {
+    setCurrentUser(null);
+    setNotification({
+      type: 'info',
+      title: 'Signed Out',
+      message: 'You have been signed out. Please register or log in to continue.',
+    });
+  };
+
+  // Passenger Quick "From & To" Popup Submit
   const handleQuickRouteSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setShowQuickRouteModal(false);
 
-    // Auto-select the first matching ride if available
     const match = rides.find(
       (r) => r.originLocationId === searchOrigin && r.destinationLocationId === searchDest
     );
-    if (match) {
-      setSelectedRideId(match.id);
-    }
+    if (match) setSelectedRideId(match.id);
 
     setNotification({
       type: 'info',
-      title: 'Routes Found',
+      title: 'Routes Loaded',
       message: `Showing rides from ${
         NATIONWIDE_CITIES.find((c) => c.id === searchOrigin)?.name
       } to ${NATIONWIDE_CITIES.find((c) => c.id === searchDest)?.name}.`,
     });
   };
 
-  // Current active ride for booking
+  // Active Ride Calculations
   const currentRide = rides.find((r) => r.id === selectedRideId) || rides[0];
   const rideBookings = bookings.filter((b) => b.rideId === currentRide.id);
   const availableSeats = calculateAvailableSeats(currentRide, rideBookings);
 
-  // Passenger matching rides
   const matchingRides = rides.filter(
     (r) => r.originLocationId === searchOrigin && r.destinationLocationId === searchDest
   );
@@ -384,15 +481,16 @@ export default function Home() {
     });
   }, [rides, filterOrigin, filterDest, filterTime, filterMode]);
 
-  // Current calculated price for booking
+  // Current price
   const currentPrice =
     bookingType === 'WHOLE_CAR'
       ? currentRide.wholeCarPrice
       : (currentRide.seatPrice || 0) * seatsRequested;
 
-  // Passenger submits booking request
+  // Passenger Booking Request Handler
   const handleCreateRequest = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!currentUser) return;
     try {
       const seatsToBook = bookingType === 'WHOLE_CAR' ? 1 : seatsRequested;
       const price = bookingType === 'WHOLE_CAR' ? currentRide.wholeCarPrice : (currentRide.seatPrice || 0) * seatsToBook;
@@ -411,18 +509,16 @@ export default function Home() {
       setNotification({
         type: 'success',
         title: 'Booking Request Sent!',
-        message: `Your request for ${bookingType === 'WHOLE_CAR' ? 'the Entire Car' : `${seatsToBook} seat(s)`} was sent. Driver will review and confirm.`,
+        message: `Your request for ${bookingType === 'WHOLE_CAR' ? 'the Entire Car' : `${seatsToBook} seat(s)`} was sent to the driver.`,
       });
     } catch (err: unknown) {
       if (err instanceof BookingEngineError) {
         setNotification({ type: 'error', title: 'Cannot Submit Request', message: err.message });
-      } else {
-        setNotification({ type: 'error', title: 'Error', message: 'Could not submit request.' });
       }
     }
   };
 
-  // Driver accepts booking
+  // Driver Acceptance Handler
   const handleAcceptRequest = (request: BookingRequest) => {
     try {
       const targetRide = rides.find((r) => r.id === request.rideId);
@@ -453,8 +549,8 @@ export default function Home() {
       setNotification({
         type: 'success',
         title: 'Booking Accepted!',
-        message: `Accepted request for ${request.passengerId}. ${
-          conflictCount > 0 ? `${conflictCount} conflicting requests were automatically rejected.` : ''
+        message: `Accepted booking for ${request.passengerId}. ${
+          conflictCount > 0 ? `${conflictCount} conflicting requests were auto-rejected.` : ''
         }`,
       });
     } catch (err: unknown) {
@@ -464,7 +560,7 @@ export default function Home() {
     }
   };
 
-  // Driver rejects booking
+  // Driver Reject Handler
   const handleRejectRequest = (request: BookingRequest) => {
     try {
       const rejected = rejectBookingRequest(request, 'Driver declined request');
@@ -481,7 +577,7 @@ export default function Home() {
     }
   };
 
-  // Driver cancels booking
+  // Driver Cancel Booking Handler
   const handleCancelBooking = (booking: BookingRequest) => {
     try {
       const targetRide = rides.find((r) => r.id === booking.rideId);
@@ -499,7 +595,7 @@ export default function Home() {
       setNotification({
         type: 'info',
         title: 'Booking Cancelled',
-        message: 'The booking was cancelled and its seats have been released back.',
+        message: 'The booking was cancelled and occupied seats released.',
       });
     } catch (err: unknown) {
       if (err instanceof BookingEngineError) {
@@ -508,9 +604,11 @@ export default function Home() {
     }
   };
 
-  // Driver publishes new ride
+  // Driver Publish Ride Handler
   const handlePublishDriverRide = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!currentUser) return;
+
     const newRide: Ride = {
       id: `ride-${Date.now().toString().slice(-4)}`,
       driverId: currentUser.id,
@@ -519,13 +617,13 @@ export default function Home() {
       destinationLocationId: driverPostDest,
       departureTime: '2026-11-03T08:00:00Z',
       bookingMode: driverPostMode,
-      capacity: Number(driverPostCapacity),
+      capacity: currentUser.vehicle?.capacity || 4,
       bookedSeatsCount: 0,
       wholeCarPrice: Number(driverPostCarPrice),
       seatPrice: driverPostMode === 'WHOLE_CAR' ? undefined : Number(driverPostSeatPrice),
       status: 'PUBLISHED',
       autoReopenOnCancellation: true,
-      notes: `${driverPostCarModel} • Departs ${driverPostTime}. ${driverPostNotes}`,
+      notes: `${currentUser.vehicle?.makeModel || 'Toyota Corolla'} • Departs ${driverPostTime}. ${driverPostNotes}`,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -534,18 +632,19 @@ export default function Home() {
     setSelectedRideId(newRide.id);
     setSearchOrigin(driverPostOrigin);
     setSearchDest(driverPostDest);
+    setActiveTab('all_listings');
     setNotification({
       type: 'success',
       title: 'Journey Published!',
       message: `Your ride from ${
         NATIONWIDE_CITIES.find((c) => c.id === driverPostOrigin)?.name
-      } to ${NATIONWIDE_CITIES.find((c) => c.id === driverPostDest)?.name} is now live for passengers!`,
+      } to ${NATIONWIDE_CITIES.find((c) => c.id === driverPostDest)?.name} is now listed!`,
     });
   };
 
-  // Helper driver display name
+  // Driver name helper
   const getDriverDisplayName = (driverId: string) => {
-    if (driverId === currentUser.id && currentUser.role === 'DRIVER') return currentUser.name + ' (You)';
+    if (currentUser && driverId === currentUser.id) return currentUser.name + ' (You)';
     switch (driverId) {
       case 'driver-tariq':
         return 'Tariq Khan';
@@ -560,86 +659,358 @@ export default function Home() {
       case 'driver-jameel':
         return 'Jameel Soomro';
       default:
-        return 'Verified Driver';
+        return 'Verified Captain';
     }
   };
 
+  // =========================================================================
+  // GATE SCREEN: IF USER IS NOT LOGGED IN / FIRST TIME VISITOR
+  // =========================================================================
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen bg-slate-900 text-white font-sans antialiased flex flex-col justify-center items-center p-4">
+        <div className="max-w-md w-full bg-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl border border-slate-700 space-y-6">
+          {/* Logo Header */}
+          <div className="text-center space-y-2">
+            <span className="text-4xl block" role="img" aria-label="car">🚗</span>
+            <h1 className="text-2xl font-black tracking-tight">ReturnRide Pakistan</h1>
+            <p className="text-xs text-emerald-400 font-bold uppercase tracking-wider">
+              Nationwide Intercity Ride Marketplace
+            </p>
+            <p className="text-xs text-slate-400">
+              Safe, affordable intercity rides across Pakistan. Reserve entire cars or individual seats.
+            </p>
+          </div>
+
+          {/* Toggle: Register vs Login */}
+          <div className="grid grid-cols-2 gap-2 bg-slate-900/80 p-1.5 rounded-2xl border border-slate-700">
+            <button
+              onClick={() => setAuthView('REGISTER')}
+              className={`py-2 text-xs font-black rounded-xl transition ${
+                authView === 'REGISTER'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              New Registration
+            </button>
+            <button
+              onClick={() => setAuthView('LOGIN')}
+              className={`py-2 text-xs font-black rounded-xl transition ${
+                authView === 'LOGIN'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Sign In (Existing)
+            </button>
+          </div>
+
+          {/* REGISTRATION FORM */}
+          {authView === 'REGISTER' && (
+            <form onSubmit={handleRegister} className="space-y-4">
+              {/* Role Picker: Passenger vs Driver */}
+              <div>
+                <label className="block text-xs font-bold text-slate-300 uppercase mb-2">
+                  Select Your Account Type:
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAuthRoleChoice('PASSENGER')}
+                    className={`p-3 rounded-2xl border-2 text-left transition flex flex-col justify-between ${
+                      authRoleChoice === 'PASSENGER'
+                        ? 'border-emerald-500 bg-emerald-950/40'
+                        : 'border-slate-700 hover:border-slate-600'
+                    }`}
+                  >
+                    <span className="text-xl">🙋‍♂️</span>
+                    <span className="font-extrabold text-xs mt-1 block">Passenger</span>
+                    <span className="text-[10px] text-slate-400">I need a ride</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setAuthRoleChoice('DRIVER')}
+                    className={`p-3 rounded-2xl border-2 text-left transition flex flex-col justify-between ${
+                      authRoleChoice === 'DRIVER'
+                        ? 'border-emerald-500 bg-emerald-950/40'
+                        : 'border-slate-700 hover:border-slate-600'
+                    }`}
+                  >
+                    <span className="text-xl">🚘</span>
+                    <span className="font-extrabold text-xs mt-1 block">Driver / Captain</span>
+                    <span className="text-[10px] text-slate-400">I have a car</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Personal Details */}
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-300 mb-1">Your Full Name</label>
+                  <input
+                    type="text"
+                    value={regName}
+                    onChange={(e) => setRegName(e.target.value)}
+                    placeholder="e.g. Muhammad Ali"
+                    required
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                      Mobile (03xx-xxxxxxx)
+                    </label>
+                    <input
+                      type="tel"
+                      value={regPhone}
+                      onChange={(e) => setRegPhone(e.target.value)}
+                      placeholder="0300-1234567"
+                      required
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-300 mb-1">Your City</label>
+                    <select
+                      value={regCity}
+                      onChange={(e) => setRegCity(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+                    >
+                      {NATIONWIDE_CITIES.map((c) => (
+                        <option key={c.id} value={c.name}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* DRIVER MANDATORY VERIFICATION & SECURITY FIELDS */}
+              {authRoleChoice === 'DRIVER' && (
+                <div className="space-y-3 border-t border-slate-700 pt-3">
+                  <div className="flex items-center gap-1.5 text-amber-400">
+                    <span className="text-sm">🛡️</span>
+                    <span className="text-[11px] font-bold uppercase tracking-wider">
+                      Driver Security & Verification
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-400">
+                    To keep Pakistani passengers safe, CNIC and Driving License are required for all drivers.
+                  </p>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-300 mb-1">CNIC Number</label>
+                      <input
+                        type="text"
+                        value={regCnic}
+                        onChange={(e) => setRegCnic(e.target.value)}
+                        placeholder="44101-1234567-1"
+                        required
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-300 mb-1">Driving License No.</label>
+                      <input
+                        type="text"
+                        value={regLicense}
+                        onChange={(e) => setRegLicense(e.target.value)}
+                        placeholder="DL-KHI-45920"
+                        required
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Vehicle Information */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-300 mb-1">Car Model</label>
+                      <input
+                        type="text"
+                        value={regCarModel}
+                        onChange={(e) => setRegCarModel(e.target.value)}
+                        placeholder="e.g. Corolla (AC)"
+                        required
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-300 mb-1">Passenger Seats</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="10"
+                        value={regCarCapacity}
+                        onChange={(e) => setRegCarCapacity(Number(e.target.value))}
+                        required
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Submit Registration */}
+              <button
+                type="submit"
+                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3.5 px-4 rounded-2xl shadow-lg transition text-xs uppercase tracking-wider cursor-pointer"
+              >
+                Complete Registration & Enter
+              </button>
+            </form>
+          )}
+
+          {/* SIGN IN FORM */}
+          {authView === 'LOGIN' && (
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                  Enter Your Registered Phone Number:
+                </label>
+                <input
+                  type="tel"
+                  value={loginPhone}
+                  onChange={(e) => setLoginPhone(e.target.value)}
+                  placeholder="0300-1234567"
+                  required
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-bold"
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3.5 px-4 rounded-2xl shadow-lg transition text-xs uppercase tracking-wider cursor-pointer"
+              >
+                Sign In to ReturnRide
+              </button>
+            </form>
+          )}
+
+          {/* 1-Tap Demo Switchers */}
+          <div className="pt-2 border-t border-slate-700/80 text-center space-y-2">
+            <span className="text-[10px] text-slate-400 font-bold uppercase">
+              Or Try Demo Accounts with 1 Click:
+            </span>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => handleDemoLogin('PASSENGER')}
+                className="bg-slate-700 hover:bg-slate-600 text-white py-2 px-3 rounded-xl text-xs font-bold transition"
+              >
+                🙋‍♂️ Demo Passenger
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDemoLogin('DRIVER')}
+                className="bg-slate-700 hover:bg-slate-600 text-white py-2 px-3 rounded-xl text-xs font-bold transition"
+              >
+                🚘 Demo Driver (Verified)
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // =========================================================================
+  // MAIN APP SCREEN (USER IS LOGGED IN)
+  // =========================================================================
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 font-sans antialiased pb-24">
-      {/* ========================================================================= */}
-      {/* APP HEADER & ROLE BAR */}
-      {/* ========================================================================= */}
+      {/* Top Header */}
       <header className="bg-emerald-800 text-white shadow-md sticky top-0 z-30">
         <div className="max-w-xl mx-auto px-4 py-2.5 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-2xl" role="img" aria-label="car">🚗</span>
             <div>
               <h1 className="text-xl font-black tracking-tight leading-none">ReturnRide</h1>
-              <p className="text-[11px] text-emerald-200 font-medium">Pakistan Intercity Ride Marketplace</p>
+              <p className="text-[10px] text-emerald-200 font-medium">Pakistan Intercity Marketplace</p>
             </div>
           </div>
 
-          {/* User Account / Role Badge */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowAuthModal(true)}
-              className="text-xs bg-emerald-950/60 hover:bg-emerald-950 text-emerald-100 hover:text-white px-2.5 py-1.5 rounded-xl border border-emerald-600/50 transition font-bold flex items-center gap-1.5"
-            >
-              <span>{currentUser.role === 'DRIVER' ? '🚘 Driver' : '🙋‍♂️ User'}</span>
-              <span className="max-w-[70px] truncate sm:max-w-none">{currentUser.name}</span>
-              <span className="text-[10px] text-emerald-300">▼</span>
-            </button>
-          </div>
+          {/* Profile Shortcut */}
+          <button
+            onClick={() => setActiveTab('profile')}
+            className="text-xs bg-emerald-950/60 hover:bg-emerald-950 text-emerald-100 hover:text-white px-3 py-1.5 rounded-xl border border-emerald-600/50 transition font-bold flex items-center gap-1.5 shadow-xs"
+          >
+            <span>{currentUser.avatarUrl || (currentUser.role === 'DRIVER' ? '👨‍✈️' : '🧑')}</span>
+            <span className="max-w-[70px] truncate sm:max-w-none">{currentUser.name}</span>
+            {currentUser.role === 'DRIVER' && currentUser.verificationStatus === 'VERIFIED' && (
+              <span className="text-amber-400 font-bold" title="Verified Captain">🛡️</span>
+            )}
+          </button>
         </div>
 
-        {/* 3 Main Navigation Tabs */}
-        <div className="max-w-xl mx-auto px-4 grid grid-cols-3 gap-1.5 pb-2">
-          {/* Passenger View Tab */}
+        {/* 4 Navigation Tabs */}
+        <div className="max-w-xl mx-auto px-4 grid grid-cols-4 gap-1 pb-2">
+          {/* Passenger Book Ride Tab */}
           <button
-            onClick={() => setActiveTab('passenger')}
-            className={`py-2 px-1 rounded-xl font-bold text-xs flex flex-col sm:flex-row items-center justify-center gap-1 transition shadow-sm ${
+            onClick={() => {
+              setActiveTab('passenger');
+              setShowQuickRouteModal(true);
+            }}
+            className={`py-2 px-0.5 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-0.5 transition ${
               activeTab === 'passenger'
-                ? 'bg-white text-emerald-900 shadow-md ring-2 ring-emerald-400 font-black'
+                ? 'bg-white text-emerald-900 shadow-md font-black'
                 : 'bg-emerald-900/60 text-emerald-100 hover:bg-emerald-900'
             }`}
           >
             <span>🙋‍♂️</span>
-            <span>Book a Ride</span>
+            <span>Book</span>
           </button>
 
           {/* Shared All Listings Tab */}
           <button
             onClick={() => setActiveTab('all_listings')}
-            className={`py-2 px-1 rounded-xl font-bold text-xs flex flex-col sm:flex-row items-center justify-center gap-1 transition shadow-sm ${
+            className={`py-2 px-0.5 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-0.5 transition ${
               activeTab === 'all_listings'
-                ? 'bg-white text-emerald-900 shadow-md ring-2 ring-emerald-400 font-black'
+                ? 'bg-white text-emerald-900 shadow-md font-black'
                 : 'bg-emerald-900/60 text-emerald-100 hover:bg-emerald-900'
             }`}
           >
             <span>📋</span>
-            <span>All Listings ({rides.length})</span>
+            <span>All Rides ({rides.length})</span>
           </button>
 
-          {/* Driver View Tab */}
+          {/* Driver Portal Tab */}
           <button
             onClick={() => setActiveTab('driver')}
-            className={`py-2 px-1 rounded-xl font-bold text-xs flex flex-col sm:flex-row items-center justify-center gap-1 transition shadow-sm ${
+            className={`py-2 px-0.5 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-0.5 transition ${
               activeTab === 'driver'
-                ? 'bg-white text-emerald-900 shadow-md ring-2 ring-emerald-400 font-black'
+                ? 'bg-white text-emerald-900 shadow-md font-black'
                 : 'bg-emerald-900/60 text-emerald-100 hover:bg-emerald-900'
             }`}
           >
             <span>🚘</span>
-            <span>Driver Portal ({bookings.filter((b) => b.status === 'PENDING').length})</span>
+            <span>Driver ({bookings.filter((b) => b.status === 'PENDING').length})</span>
+          </button>
+
+          {/* Profile & Verification Tab */}
+          <button
+            onClick={() => setActiveTab('profile')}
+            className={`py-2 px-0.5 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-0.5 transition ${
+              activeTab === 'profile'
+                ? 'bg-white text-emerald-900 shadow-md font-black'
+                : 'bg-emerald-900/60 text-emerald-100 hover:bg-emerald-900'
+            }`}
+          >
+            <span>👤</span>
+            <span>Profile</span>
           </button>
         </div>
       </header>
 
-      {/* ========================================================================= */}
-      {/* MAIN CONTAINER */}
-      {/* ========================================================================= */}
+      {/* Main Content Area */}
       <main className="max-w-xl mx-auto px-4 pt-3.5 space-y-4">
-        {/* Notification Banner */}
+        {/* Notification Alert */}
         {notification && (
           <div
             className={`p-3.5 rounded-2xl border flex items-start justify-between shadow-sm transition ${
@@ -669,15 +1040,15 @@ export default function Home() {
         )}
 
         {/* ========================================================================= */}
-        {/* VIEW 1: PASSENGER / USER SEARCH & BOOKING */}
+        {/* TAB 1: PASSENGER BOOKING VIEW */}
         {/* ========================================================================= */}
         {activeTab === 'passenger' && (
           <div className="space-y-4">
-            {/* Quick Route Selector Bar */}
+            {/* Quick Route Bar */}
             <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                  Your Selected Route
+                  Your Journey Route
                 </span>
                 <button
                   onClick={() => setShowQuickRouteModal(true)}
@@ -688,7 +1059,6 @@ export default function Home() {
                 </button>
               </div>
 
-              {/* Visual Route Indicator */}
               <div
                 onClick={() => setShowQuickRouteModal(true)}
                 className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-center justify-between cursor-pointer hover:bg-emerald-100/60 transition"
@@ -703,18 +1073,12 @@ export default function Home() {
                   <span className="text-base font-extrabold text-slate-900">{destName}</span>
                 </div>
               </div>
-
-              <div className="mt-2 text-right">
-                <span className="text-[11px] text-slate-500">
-                  {matchingRides.length} ride(s) available for this route
-                </span>
-              </div>
             </div>
 
-            {/* Ride Card (Matching route) */}
+            {/* Matching Ride Card */}
             {matchingRides.length > 0 ? (
               <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                {/* Header: Driver Info & Status */}
+                {/* Driver Info Header */}
                 <div className="p-4 bg-gradient-to-r from-slate-50 to-white border-b border-slate-100 flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="w-12 h-12 rounded-full bg-emerald-100 border border-emerald-300 flex items-center justify-center text-xl font-bold text-emerald-800">
@@ -725,8 +1089,9 @@ export default function Home() {
                         <span className="font-extrabold text-slate-900 text-base">
                           {getDriverDisplayName(currentRide.driverId)}
                         </span>
-                        <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-bold">
-                          VERIFIED
+                        <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5">
+                          <span>🛡️</span>
+                          <span>VERIFIED</span>
                         </span>
                       </div>
                       <p className="text-xs text-slate-500 font-medium">{currentRide.notes}</p>
@@ -750,15 +1115,10 @@ export default function Home() {
                         All Seats Filled
                       </span>
                     )}
-                    {currentRide.status === 'CANCELLED' && (
-                      <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-rose-100 text-rose-800">
-                        Ride Cancelled
-                      </span>
-                    )}
                   </div>
                 </div>
 
-                {/* Capacity Counter */}
+                {/* Free Capacity Banner */}
                 <div className="px-4 py-2 bg-slate-50 flex items-center justify-between border-b border-slate-100 text-xs">
                   <span className="text-slate-600 font-medium">Free Capacity:</span>
                   <span
@@ -766,16 +1126,16 @@ export default function Home() {
                       availableSeats > 0 ? 'text-emerald-700' : 'text-rose-600'
                     }`}
                   >
-                    {availableSeats} of {currentRide.capacity} seats free
+                    {availableSeats} of {currentRide.capacity} seats remaining
                   </span>
                 </div>
 
-                {/* Booking Form */}
+                {/* Booking Options */}
                 {currentRide.status === 'PUBLISHED' ? (
                   <form onSubmit={handleCreateRequest} className="p-4 space-y-4">
                     <div>
                       <span className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
-                        Select How You Want to Travel
+                        Select How You Want to Ride
                       </span>
 
                       <div className="grid grid-cols-1 gap-2.5">
@@ -856,7 +1216,7 @@ export default function Home() {
                         )}
                       </div>
 
-                      {/* Seat Stepper */}
+                      {/* Stepper for Seat count */}
                       {bookingType === 'SEAT' && (
                         <div className="mt-3 p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between">
                           <span className="text-xs font-bold text-slate-700">How many seats do you need?</span>
@@ -883,51 +1243,39 @@ export default function Home() {
                       )}
                     </div>
 
-                    {/* Passenger Profile Indicator */}
-                    <div className="border-t border-slate-100 pt-3 space-y-2">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-slate-500 font-medium">Booking As:</span>
-                        <span className="font-bold text-slate-800">
-                          {currentUser.name} ({currentUser.phone})
-                        </span>
-                      </div>
-
-                      {/* Cash Guarantee */}
-                      <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 flex items-center gap-2.5 text-amber-900">
-                        <span className="text-lg">💵</span>
-                        <p className="text-[11px] leading-tight">
-                          <strong>Pay Cash When Boarding:</strong> No online card needed.
-                          Pay Rs. {currentPrice.toLocaleString()} directly to the driver.
-                        </p>
-                      </div>
-
-                      {/* Submit Button */}
-                      <button
-                        type="submit"
-                        disabled={availableSeats <= 0}
-                        className="w-full bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 text-white font-black py-4 px-4 rounded-2xl shadow-md transition text-sm flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
-                      >
-                        <span>Send Booking Request (Rs. {currentPrice.toLocaleString()})</span>
-                        <span>➔</span>
-                      </button>
+                    {/* Cash Guarantee */}
+                    <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 flex items-center gap-2.5 text-amber-900">
+                      <span className="text-lg">💵</span>
+                      <p className="text-[11px] leading-tight">
+                        <strong>Pay Cash When Boarding:</strong> No credit card needed.
+                        Pay Rs. {currentPrice.toLocaleString()} directly to the driver when boarding.
+                      </p>
                     </div>
+
+                    {/* Submit Button */}
+                    <button
+                      type="submit"
+                      disabled={availableSeats <= 0}
+                      className="w-full bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 text-white font-black py-4 px-4 rounded-2xl shadow-md transition text-sm flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
+                    >
+                      <span>Send Booking Request (Rs. {currentPrice.toLocaleString()})</span>
+                      <span>➔</span>
+                    </button>
                   </form>
                 ) : (
                   <div className="p-6 text-center text-slate-500 bg-slate-50">
                     <p className="text-sm font-bold text-slate-700">This ride is currently unavailable</p>
-                    <p className="text-xs text-slate-400 mt-1">{currentRide.status}</p>
                   </div>
                 )}
               </div>
             ) : (
-              /* No matching rides for selected route */
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 text-center space-y-3">
                 <span className="text-3xl block">🔍</span>
                 <h3 className="text-sm font-extrabold text-slate-900">
                   No direct ride found between {originName} and {destName}
                 </h3>
                 <p className="text-xs text-slate-500 max-w-xs mx-auto">
-                  Try browsing all nationwide listings, or change your search cities.
+                  Browse all active nationwide rides, or choose a different route.
                 </p>
                 <div className="flex justify-center gap-2">
                   <button
@@ -940,13 +1288,13 @@ export default function Home() {
                     onClick={() => setActiveTab('all_listings')}
                     className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs py-2 px-4 rounded-xl transition"
                   >
-                    Browse All Listings
+                    View All Rides
                   </button>
                 </div>
               </div>
             )}
 
-            {/* Passenger Active Bookings */}
+            {/* Passenger My Bookings */}
             {bookings.length > 0 && (
               <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 space-y-3">
                 <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
@@ -1019,7 +1367,7 @@ export default function Home() {
         )}
 
         {/* ========================================================================= */}
-        {/* VIEW 2: ALL RIDE LISTINGS (SHARED FOR BOTH DRIVER & USER) */}
+        {/* TAB 2: ALL RIDE LISTINGS (SHARED FOR BOTH DRIVER & USER) */}
         {/* ========================================================================= */}
         {activeTab === 'all_listings' && (
           <div className="space-y-4">
@@ -1191,7 +1539,7 @@ export default function Home() {
                             message: `Selected ${oCity} ➔ ${dCity}. Choose Full Car or Seats below.`,
                           });
                         }}
-                        className="bg-emerald-700 hover:bg-emerald-800 text-white font-extrabold text-xs py-2 px-3.5 rounded-xl transition shadow-xs flex items-center gap-1"
+                        className="bg-emerald-700 hover:bg-emerald-800 text-white font-extrabold text-xs py-2 px-3.5 rounded-xl transition shadow-xs flex items-center gap-1 cursor-pointer"
                       >
                         <span>Book This</span>
                         <span>➔</span>
@@ -1205,176 +1553,177 @@ export default function Home() {
         )}
 
         {/* ========================================================================= */}
-        {/* VIEW 3: DRIVER PORTAL & PUBLISH RIDE */}
+        {/* TAB 3: DRIVER PORTAL */}
         {/* ========================================================================= */}
         {activeTab === 'driver' && (
           <div className="space-y-4">
-            {/* Driver Profile Header */}
-            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                    Captain / Driver Account
-                  </span>
-                  <h2 className="text-base font-black text-slate-900">{currentUser.name}</h2>
-                  <p className="text-xs text-slate-500 font-medium">
-                    {currentUser.vehicle?.makeModel || 'Toyota Corolla (AC)'} • Plate:{' '}
-                    {currentUser.vehicle?.plate || 'LEB-4592'}
-                  </p>
+            {/* Driver Security & Verification Banner */}
+            {currentUser.role === 'DRIVER' ? (
+              <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-base font-black text-slate-900">{currentUser.name}</h2>
+                      {currentUser.verificationStatus === 'VERIFIED' ? (
+                        <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-black flex items-center gap-1">
+                          <span>🛡️</span>
+                          <span>VERIFIED CAPTAIN</span>
+                        </span>
+                      ) : (
+                        <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-black flex items-center gap-1">
+                          <span>⏳</span>
+                          <span>DOCUMENTS UNDER REVIEW</span>
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-500 font-medium mt-0.5">
+                      {currentUser.vehicle?.makeModel} ({currentUser.vehicle?.color}) • Plate:{' '}
+                      {currentUser.vehicle?.plate} • {currentUser.vehicle?.capacity} Seats
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setActiveTab('profile')}
+                    className="text-xs text-emerald-700 font-extrabold hover:underline"
+                  >
+                    View Documents
+                  </button>
                 </div>
+              </div>
+            ) : (
+              <div className="bg-amber-50 p-4 rounded-2xl border border-amber-200 text-amber-900 space-y-2">
+                <h4 className="text-xs font-bold uppercase tracking-wider">You are signed in as Passenger</h4>
+                <p className="text-xs">
+                  To publish rides and earn as a driver, please register as a Driver or switch account in Profile.
+                </p>
                 <button
-                  onClick={() => setShowAuthModal(true)}
-                  className="text-xs text-emerald-700 font-bold hover:underline"
+                  onClick={() => {
+                    handleDemoLogin('DRIVER');
+                  }}
+                  className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs py-2 px-3 rounded-xl transition"
                 >
-                  Edit Profile
+                  Switch to Captain Account
                 </button>
               </div>
-            </div>
+            )}
 
-            {/* Publish Ride Form */}
-            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 space-y-3">
-              <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-1.5">
-                <span>➕</span>
-                <span>List a New Ride for Passengers</span>
-              </h3>
+            {/* Publish Ride Card */}
+            {currentUser.role === 'DRIVER' && (
+              <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 space-y-3">
+                <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-1.5">
+                  <span>➕</span>
+                  <span>List a New Intercity Journey</span>
+                </h3>
 
-              <form onSubmit={handlePublishDriverRide} className="space-y-3 pt-1">
-                {/* From & To */}
-                <div className="grid grid-cols-2 gap-2">
+                <form onSubmit={handlePublishDriverRide} className="space-y-3 pt-1">
+                  {/* From & To */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">Departure (From)</label>
+                      <select
+                        value={driverPostOrigin}
+                        onChange={(e) => setDriverPostOrigin(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-semibold"
+                      >
+                        {NATIONWIDE_CITIES.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">Arrival (To)</label>
+                      <select
+                        value={driverPostDest}
+                        onChange={(e) => setDriverPostDest(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-semibold"
+                      >
+                        {NATIONWIDE_CITIES.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Booking Option */}
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-600 mb-1">Departure City (From)</label>
-                    <select
-                      value={driverPostOrigin}
-                      onChange={(e) => setDriverPostOrigin(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-semibold"
-                    >
-                      {NATIONWIDE_CITIES.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                      Booking Option Offered:
+                    </label>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setDriverPostMode('WHOLE_CAR_OR_SEATS')}
+                        className={`py-2 px-1 text-center rounded-xl text-xs font-bold border transition ${
+                          driverPostMode === 'WHOLE_CAR_OR_SEATS'
+                            ? 'bg-slate-900 text-white border-slate-900'
+                            : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                        }`}
+                      >
+                        Both Options
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDriverPostMode('WHOLE_CAR')}
+                        className={`py-2 px-1 text-center rounded-xl text-xs font-bold border transition ${
+                          driverPostMode === 'WHOLE_CAR'
+                            ? 'bg-slate-900 text-white border-slate-900'
+                            : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                        }`}
+                      >
+                        Full Car Only
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDriverPostMode('SEATS')}
+                        className={`py-2 px-1 text-center rounded-xl text-xs font-bold border transition ${
+                          driverPostMode === 'SEATS'
+                            ? 'bg-slate-900 text-white border-slate-900'
+                            : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                        }`}
+                      >
+                        Seats Only
+                      </button>
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-600 mb-1">Arrival City (To)</label>
-                    <select
-                      value={driverPostDest}
-                      onChange={(e) => setDriverPostDest(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-semibold"
-                    >
-                      {NATIONWIDE_CITIES.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
+                  {/* Pricing Fields */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">Whole Car Price (Rs.)</label>
+                      <input
+                        type="number"
+                        value={driverPostCarPrice}
+                        onChange={(e) => setDriverPostCarPrice(Number(e.target.value))}
+                        required
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-semibold"
+                      />
+                    </div>
 
-                {/* Car Details & Capacity */}
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-600 mb-1">Vehicle Model & AC</label>
-                    <input
-                      type="text"
-                      value={driverPostCarModel}
-                      onChange={(e) => setDriverPostCarModel(e.target.value)}
-                      placeholder="e.g. Toyota Corolla (AC)"
-                      required
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-semibold"
-                    />
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">Price Per Seat (Rs.)</label>
+                      <input
+                        type="number"
+                        value={driverPostSeatPrice}
+                        onChange={(e) => setDriverPostSeatPrice(Number(e.target.value))}
+                        disabled={driverPostMode === 'WHOLE_CAR'}
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-semibold disabled:bg-slate-100 disabled:text-slate-400"
+                      />
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-600 mb-1">Passenger Seats</label>
-                    <input
-                      type="number"
-                      min="1"
-                      max="10"
-                      value={driverPostCapacity}
-                      onChange={(e) => setDriverPostCapacity(Number(e.target.value))}
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-semibold"
-                    />
-                  </div>
-                </div>
-
-                {/* Booking Mode Choice */}
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                    Booking Option Offered:
-                  </label>
-                  <div className="grid grid-cols-3 gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setDriverPostMode('WHOLE_CAR_OR_SEATS')}
-                      className={`py-2 px-1 text-center rounded-xl text-xs font-bold border transition ${
-                        driverPostMode === 'WHOLE_CAR_OR_SEATS'
-                          ? 'bg-slate-900 text-white border-slate-900'
-                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                      }`}
-                    >
-                      Both Options
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDriverPostMode('WHOLE_CAR')}
-                      className={`py-2 px-1 text-center rounded-xl text-xs font-bold border transition ${
-                        driverPostMode === 'WHOLE_CAR'
-                          ? 'bg-slate-900 text-white border-slate-900'
-                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                      }`}
-                    >
-                      Full Car Only
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDriverPostMode('SEATS')}
-                      className={`py-2 px-1 text-center rounded-xl text-xs font-bold border transition ${
-                        driverPostMode === 'SEATS'
-                          ? 'bg-slate-900 text-white border-slate-900'
-                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                      }`}
-                    >
-                      Seats Only
-                    </button>
-                  </div>
-                </div>
-
-                {/* Pricing Fields */}
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-600 mb-1">Whole Car Price (Rs.)</label>
-                    <input
-                      type="number"
-                      value={driverPostCarPrice}
-                      onChange={(e) => setDriverPostCarPrice(Number(e.target.value))}
-                      required
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-semibold"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-600 mb-1">Price Per Seat (Rs.)</label>
-                    <input
-                      type="number"
-                      value={driverPostSeatPrice}
-                      onChange={(e) => setDriverPostSeatPrice(Number(e.target.value))}
-                      disabled={driverPostMode === 'WHOLE_CAR'}
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-semibold disabled:bg-slate-100 disabled:text-slate-400"
-                    />
-                  </div>
-                </div>
-
-                {/* Submit Ride */}
-                <button
-                  type="submit"
-                  className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-extrabold text-xs py-3.5 rounded-xl shadow-xs transition cursor-pointer"
-                >
-                  Publish Ride Online (Passengers Can Book)
-                </button>
-              </form>
-            </div>
+                  <button
+                    type="submit"
+                    className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-extrabold text-xs py-3.5 rounded-xl shadow-xs transition cursor-pointer"
+                  >
+                    Publish Ride Online (Passengers Can Book)
+                  </button>
+                </form>
+              </div>
+            )}
 
             {/* Incoming Requests Manager */}
             <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 space-y-3">
@@ -1476,7 +1825,135 @@ export default function Home() {
         )}
 
         {/* ========================================================================= */}
-        {/* MODAL 1: PASSENGER "WHERE TO?" POPUP (ONLY FROM & TO) */}
+        {/* TAB 4: PROFILE & SECURITY (DEDICATED SECTION) */}
+        {/* ========================================================================= */}
+        {activeTab === 'profile' && (
+          <div className="space-y-4">
+            {/* User Profile Card */}
+            <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-200 space-y-4">
+              <div className="flex items-center gap-4">
+                <div className="w-16 h-16 rounded-full bg-emerald-100 border-2 border-emerald-300 flex items-center justify-center text-3xl shadow-xs">
+                  {currentUser.avatarUrl || '🧑'}
+                </div>
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <h2 className="text-lg font-black text-slate-900">{currentUser.name}</h2>
+                    {currentUser.role === 'DRIVER' && currentUser.verificationStatus === 'VERIFIED' && (
+                      <span className="text-amber-500 font-bold text-base" title="Verified Driver">🛡️</span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-500 font-bold">
+                    {currentUser.role === 'DRIVER' ? '🚘 Captain / Driver' : '🙋‍♂️ Passenger'} • {currentUser.city || 'Pakistan'}
+                  </p>
+                  <p className="text-xs text-emerald-800 font-extrabold mt-0.5">{currentUser.phone}</p>
+                </div>
+              </div>
+
+              {/* Safety & Emergency Contact Card */}
+              <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-1">
+                <span className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">
+                  Emergency Safety Contact
+                </span>
+                <p className="text-xs font-bold text-slate-700">
+                  Phone: {currentUser.emergencyContact || '0300-1122334'} (Family / Relative)
+                </p>
+              </div>
+
+              {/* DRIVER DEDICATED VERIFICATION & SECURITY SECTION */}
+              {currentUser.role === 'DRIVER' && (
+                <div className="border-t border-slate-100 pt-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-base">🛡️</span>
+                      <h3 className="text-sm font-black text-slate-900">Security & Document Verification</h3>
+                    </div>
+
+                    <span
+                      className={`text-[10px] font-black px-2.5 py-1 rounded-full uppercase ${
+                        currentUser.verificationStatus === 'VERIFIED'
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-amber-100 text-amber-800'
+                      }`}
+                    >
+                      {currentUser.verificationStatus === 'VERIFIED' ? 'Verified Captain' : 'Under Review'}
+                    </span>
+                  </div>
+
+                  <p className="text-[11px] text-slate-500">
+                    Mandatory verification ensures safety for all passengers traveling intercity in Pakistan.
+                  </p>
+
+                  {/* Document Checklist Items */}
+                  <div className="space-y-2">
+                    {/* CNIC Card */}
+                    <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">🪪</span>
+                        <div>
+                          <span className="font-bold text-slate-800 block">CNIC (National ID Card)</span>
+                          <span className="text-[11px] text-slate-500">{currentUser.cnicNumber || '44101-1234567-1'}</span>
+                        </div>
+                      </div>
+                      <span className="text-xs text-emerald-700 font-extrabold">✓ Attached</span>
+                    </div>
+
+                    {/* Driving License */}
+                    <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">📄</span>
+                        <div>
+                          <span className="font-bold text-slate-800 block">Driving License</span>
+                          <span className="text-[11px] text-slate-500">{currentUser.licenseNumber || 'DL-HYD-99812'}</span>
+                        </div>
+                      </div>
+                      <span className="text-xs text-emerald-700 font-extrabold">✓ Attached</span>
+                    </div>
+
+                    {/* Vehicle Registration */}
+                    <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">🚘</span>
+                        <div>
+                          <span className="font-bold text-slate-800 block">Vehicle Registration Book</span>
+                          <span className="text-[11px] text-slate-500">
+                            {currentUser.vehicle?.makeModel} ({currentUser.vehicle?.plate})
+                          </span>
+                        </div>
+                      </div>
+                      <span className="text-xs text-emerald-700 font-extrabold">✓ Attached</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="border-t border-slate-100 pt-3 flex flex-col gap-2">
+                <button
+                  onClick={() => {
+                    if (currentUser.role === 'PASSENGER') {
+                      handleDemoLogin('DRIVER');
+                    } else {
+                      handleDemoLogin('PASSENGER');
+                    }
+                  }}
+                  className="w-full bg-slate-900 hover:bg-black text-white font-bold text-xs py-3 rounded-xl transition text-center"
+                >
+                  Switch Role to {currentUser.role === 'PASSENGER' ? '🚘 Driver / Captain' : '🙋‍♂️ Passenger'}
+                </button>
+
+                <button
+                  onClick={handleLogout}
+                  className="w-full bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs py-3 rounded-xl transition text-center cursor-pointer"
+                >
+                  Sign Out of Account
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* MODAL: PASSENGER "WHERE TO?" POPUP (ONLY FROM & TO) */}
         {/* ========================================================================= */}
         {showQuickRouteModal && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
@@ -1583,153 +2060,6 @@ export default function Home() {
                   <span>➔</span>
                 </button>
               </form>
-            </div>
-          </div>
-        )}
-
-        {/* ========================================================================= */}
-        {/* MODAL 2: USER REGISTRATION & LOGIN (DRIVER VS PASSENGER) */}
-        {/* ========================================================================= */}
-        {showAuthModal && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl border border-slate-200">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                <div>
-                  <h3 className="text-base font-black text-slate-900">User Account & Role</h3>
-                  <p className="text-xs text-slate-400">Register or switch between Driver and User</p>
-                </div>
-                <button
-                  onClick={() => setShowAuthModal(false)}
-                  className="text-slate-400 hover:text-slate-700 font-bold text-lg"
-                >
-                  ✕
-                </button>
-              </div>
-
-              {/* Role Toggle Switch */}
-              <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1 rounded-2xl">
-                <button
-                  type="button"
-                  onClick={() => setAuthRoleChoice('PASSENGER')}
-                  className={`py-2 text-xs font-extrabold rounded-xl transition ${
-                    authRoleChoice === 'PASSENGER'
-                      ? 'bg-white text-emerald-900 shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  🙋‍♂️ I am a Passenger
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAuthRoleChoice('DRIVER')}
-                  className={`py-2 text-xs font-extrabold rounded-xl transition ${
-                    authRoleChoice === 'DRIVER'
-                      ? 'bg-white text-emerald-900 shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  🚘 I am a Driver
-                </button>
-              </div>
-
-              {/* Registration Form */}
-              <form onSubmit={handleAuthSubmit} className="space-y-3">
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-600 mb-1">Full Name</label>
-                  <input
-                    type="text"
-                    value={regName}
-                    onChange={(e) => setRegName(e.target.value)}
-                    placeholder={authRoleChoice === 'DRIVER' ? 'e.g. Tariq Khan' : 'e.g. Muhammad Ali'}
-                    required
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                    Mobile Number (Pakistan 03xx)
-                  </label>
-                  <input
-                    type="tel"
-                    value={regPhone}
-                    onChange={(e) => setRegPhone(e.target.value)}
-                    placeholder="0300-1234567"
-                    required
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold"
-                  />
-                </div>
-
-                {/* Additional Driver Vehicle Fields */}
-                {authRoleChoice === 'DRIVER' && (
-                  <div className="space-y-2 border-t border-slate-100 pt-2">
-                    <span className="block text-[10px] font-extrabold text-slate-400 uppercase">
-                      Vehicle Information
-                    </span>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="block text-[11px] font-bold text-slate-600 mb-1">Car Model</label>
-                        <input
-                          type="text"
-                          value={regCarModel}
-                          onChange={(e) => setRegCarModel(e.target.value)}
-                          placeholder="e.g. Corolla (AC)"
-                          required
-                          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs font-semibold"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-bold text-slate-600 mb-1">Total Seats</label>
-                        <input
-                          type="number"
-                          min="1"
-                          max="10"
-                          value={regCarCapacity}
-                          onChange={(e) => setRegCarCapacity(Number(e.target.value))}
-                          required
-                          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs font-semibold"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-extrabold text-xs py-3 rounded-xl transition shadow-xs mt-2 cursor-pointer"
-                >
-                  Save & Continue as {authRoleChoice === 'DRIVER' ? 'Driver' : 'Passenger'}
-                </button>
-              </form>
-
-              {/* Quick 1-tap demo switchers */}
-              <div className="pt-2 border-t border-slate-100">
-                <span className="block text-[10px] text-slate-400 font-bold uppercase mb-1.5 text-center">
-                  Or Test with Demo Accounts:
-                </span>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleQuickSwitchRole('PASSENGER');
-                      setShowAuthModal(false);
-                    }}
-                    className="text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-700 p-2 rounded-xl font-bold transition text-center"
-                  >
-                    Demo Passenger
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleQuickSwitchRole('DRIVER');
-                      setShowAuthModal(false);
-                    }}
-                    className="text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-700 p-2 rounded-xl font-bold transition text-center"
-                  >
-                    Demo Driver
-                  </button>
-                </div>
-              </div>
             </div>
           </div>
         )}
