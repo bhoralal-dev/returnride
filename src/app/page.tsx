@@ -54,6 +54,7 @@ export type VerificationState = 'UNVERIFIED' | 'PENDING_REVIEW' | 'VERIFIED';
 export interface AppUserProfile {
   id: string;
   name: string;
+  email: string;
   phone: string;
   role: 'PASSENGER' | 'DRIVER';
   avatarUrl?: string;
@@ -78,6 +79,7 @@ export interface AppUserProfile {
 const INITIAL_DEMO_PASSENGER: AppUserProfile = {
   id: 'usr-ali',
   name: 'Muhammad Ali',
+  email: 'ali@example.com',
   phone: '0301-2345678',
   role: 'PASSENGER',
   avatarUrl: '👨‍💼',
@@ -88,6 +90,7 @@ const INITIAL_DEMO_PASSENGER: AppUserProfile = {
 const INITIAL_DEMO_DRIVER: AppUserProfile = {
   id: 'driver-tariq',
   name: 'Tariq Khan',
+  email: 'tariq.captain@example.com',
   phone: '0300-9876543',
   role: 'DRIVER',
   avatarUrl: '👨‍✈️',
@@ -228,10 +231,11 @@ export default function Home() {
   const [currentUser, setCurrentUser] = useState<AppUserProfile | null>(null);
   const [isClientLoaded, setIsClientLoaded] = useState(false);
 
-  // Auth screen state
-  const [authView, setAuthView] = useState<'REGISTER' | 'LOGIN'>('REGISTER');
+  // Auth screen state (Email OTP registration, Email-only login)
+  const [authView, setAuthView] = useState<'REGISTER' | 'VERIFY_OTP' | 'LOGIN'>('REGISTER');
   const [authRoleChoice, setAuthRoleChoice] = useState<'PASSENGER' | 'DRIVER'>('PASSENGER');
   const [regName, setRegName] = useState('');
+  const [regEmail, setRegEmail] = useState('');
   const [regPhone, setRegPhone] = useState('');
   const [regCity, setRegCity] = useState('Karachi');
   const [regEmergency, setRegEmergency] = useState('');
@@ -242,7 +246,18 @@ export default function Home() {
   const [regCarAc, setRegCarAc] = useState(true);
   const [regCnic, setRegCnic] = useState('');
   const [regLicense, setRegLicense] = useState('');
-  const [loginPhone, setLoginPhone] = useState('');
+
+  // OTP Verification state
+  const [regOtp, setRegOtp] = useState('');
+  const [generatedOtp, setGeneratedOtp] = useState('');
+  const [pendingUser, setPendingUser] = useState<AppUserProfile | null>(null);
+
+  // Email-only Login state
+  const [loginEmail, setLoginEmail] = useState('');
+  const [registeredUsers, setRegisteredUsers] = useState<AppUserProfile[]>([
+    INITIAL_DEMO_PASSENGER,
+    INITIAL_DEMO_DRIVER,
+  ]);
 
   // App Tabs: 'passenger' | 'all_listings' | 'driver' | 'profile'
   const [activeTab, setActiveTab] = useState<'passenger' | 'all_listings' | 'driver' | 'profile'>('passenger');
@@ -299,6 +314,7 @@ export default function Home() {
   useEffect(() => {
     try {
       const savedUser = localStorage.getItem('returnride_user');
+      const savedRegisteredUsers = localStorage.getItem('returnride_registered_users');
       const savedRides = localStorage.getItem('returnride_rides');
       const savedBookings = localStorage.getItem('returnride_bookings');
       const savedEvents = localStorage.getItem('returnride_canc_events');
@@ -310,6 +326,13 @@ export default function Home() {
           setCurrentUser(parsedUser);
           if (parsedUser.role === 'PASSENGER') {
             setShowQuickRouteModal(true);
+          }
+        }
+        if (savedRegisteredUsers) {
+          try {
+            setRegisteredUsers(JSON.parse(savedRegisteredUsers));
+          } catch {
+            // Ignore
           }
         }
         if (savedRides) setRides(JSON.parse(savedRides));
@@ -335,6 +358,7 @@ export default function Home() {
       } else {
         localStorage.removeItem('returnride_user');
       }
+      localStorage.setItem('returnride_registered_users', JSON.stringify(registeredUsers));
       localStorage.setItem('returnride_rides', JSON.stringify(rides));
       localStorage.setItem('returnride_bookings', JSON.stringify(bookings));
       localStorage.setItem('returnride_canc_events', JSON.stringify(cancellationEvents));
@@ -342,7 +366,7 @@ export default function Home() {
     } catch {
       // Ignore
     }
-  }, [currentUser, rides, bookings, cancellationEvents, appeals, isClientLoaded]);
+  }, [currentUser, registeredUsers, rides, bookings, cancellationEvents, appeals, isClientLoaded]);
 
   // Current User Evaluated Reliability Profile
   const userReliability = useMemo(() => {
@@ -356,11 +380,16 @@ export default function Home() {
     });
   }, [currentUser, cancellationEvents, appeals]);
 
-  // Handle Registration
+  // Handle Registration Step 1: Validate & Send Email OTP
   const handleRegister = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!regName.trim() || !regPhone.trim()) {
-      alert('Please provide your Full Name and Mobile Number.');
+    if (!regName.trim() || !regEmail.trim()) {
+      alert('Please provide your Full Name and Email Address.');
+      return;
+    }
+
+    if (!regEmail.includes('@') || !regEmail.includes('.')) {
+      alert('Please enter a valid email address for OTP verification.');
       return;
     }
 
@@ -369,10 +398,14 @@ export default function Home() {
       return;
     }
 
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    setGeneratedOtp(code);
+
     const newUser: AppUserProfile = {
       id: generateClientUniqueId('usr'),
       name: regName.trim(),
-      phone: regPhone.trim(),
+      email: regEmail.trim().toLowerCase(),
+      phone: regPhone.trim() || '0300-1234567',
       role: authRoleChoice,
       avatarUrl: authRoleChoice === 'DRIVER' ? '👨‍✈️' : '🧑',
       city: regCity,
@@ -390,51 +423,113 @@ export default function Home() {
       cnicNumber: authRoleChoice === 'DRIVER' ? regCnic.trim() : undefined,
       licenseNumber: authRoleChoice === 'DRIVER' ? regLicense.trim() : undefined,
       verificationStatus: authRoleChoice === 'DRIVER' ? 'PENDING_REVIEW' : undefined,
-      idDocumentUploaded: authRoleChoice === 'DRIVER' ? true : false,
-      licenseDocumentUploaded: authRoleChoice === 'DRIVER' ? true : false,
-      vehicleRegistrationUploaded: authRoleChoice === 'DRIVER' ? true : false,
+      idDocumentUploaded: authRoleChoice === 'DRIVER',
+      licenseDocumentUploaded: authRoleChoice === 'DRIVER',
+      vehicleRegistrationUploaded: authRoleChoice === 'DRIVER',
     };
 
-    setCurrentUser(newUser);
+    setPendingUser(newUser);
+    setAuthView('VERIFY_OTP');
 
-    if (authRoleChoice === 'PASSENGER') {
+    setNotification({
+      type: 'info',
+      title: 'Email OTP Dispatched',
+      message: `A 6-digit verification code has been dispatched to ${newUser.email}. Test Code: ${code}`,
+    });
+  };
+
+  // Handle Registration Step 2: Verify OTP & Activate Account
+  const handleVerifyOtp = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (regOtp.trim() !== generatedOtp) {
+      alert(`Invalid verification code. Please enter the 6-digit code sent to your email (Demo Code: ${generatedOtp}).`);
+      return;
+    }
+
+    if (!pendingUser) {
+      alert('Registration session expired. Please register again.');
+      setAuthView('REGISTER');
+      return;
+    }
+
+    const completedUser = pendingUser;
+    setRegisteredUsers((prev) => {
+      const filtered = prev.filter((u) => u.email.toLowerCase() !== completedUser.email.toLowerCase());
+      return [...filtered, completedUser];
+    });
+
+    setCurrentUser(completedUser);
+    setPendingUser(null);
+    setRegOtp('');
+
+    if (completedUser.role === 'PASSENGER') {
       setActiveTab('passenger');
       setShowQuickRouteModal(true); // Immediate "From/To" popup!
       setNotification({
         type: 'success',
-        title: 'Welcome, ' + newUser.name + '!',
+        title: `Welcome, ${completedUser.name}!`,
         message: 'Where do you want to travel? Choose your departure and destination.',
       });
     } else {
       setActiveTab('driver');
       setNotification({
         type: 'info',
-        title: 'Driver Account Created',
+        title: 'Driver Account Verified & Created',
         message: 'Your documents have been submitted for verification. You can now list rides.',
       });
     }
   };
 
-  // Handle Login
+  // Resend OTP Helper
+  const handleResendOtp = () => {
+    const newCode = Math.floor(100000 + Math.random() * 900000).toString();
+    setGeneratedOtp(newCode);
+    setNotification({
+      type: 'info',
+      title: 'New Verification Code Generated',
+      message: `A fresh 6-digit code has been generated: ${newCode}`,
+    });
+  };
+
+  // Handle Login: Email-Only Instant Access
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!loginPhone.trim()) {
-      alert('Please enter your registered mobile number.');
+    const normalized = loginEmail.trim().toLowerCase();
+    if (!normalized || !normalized.includes('@')) {
+      alert('Please enter your registered email address.');
       return;
     }
 
-    // Check if matching driver or passenger
-    const isDriverPhone = loginPhone.includes('9876') || loginPhone.includes('driver');
-    const userToLogin: AppUserProfile = isDriverPhone
-      ? INITIAL_DEMO_DRIVER
-      : {
-          ...INITIAL_DEMO_PASSENGER,
-          phone: loginPhone,
+    // Match in registeredUsers or demo profiles
+    let matchedUser = registeredUsers.find((u) => u.email.toLowerCase() === normalized);
+
+    if (!matchedUser) {
+      if (
+        normalized === INITIAL_DEMO_DRIVER.email.toLowerCase() ||
+        normalized.includes('driver') ||
+        normalized.includes('captain')
+      ) {
+        matchedUser = {
+          ...INITIAL_DEMO_DRIVER,
+          email: normalized,
         };
+      } else {
+        matchedUser = {
+          ...INITIAL_DEMO_PASSENGER,
+          name:
+            normalized
+              .split('@')[0]
+              .replace(/[^a-zA-Z]/g, ' ')
+              .replace(/\b\w/g, (c) => c.toUpperCase())
+              .trim() || 'Valued Passenger',
+          email: normalized,
+        };
+      }
+    }
 
-    setCurrentUser(userToLogin);
+    setCurrentUser(matchedUser);
 
-    if (userToLogin.role === 'PASSENGER') {
+    if (matchedUser.role === 'PASSENGER') {
       setActiveTab('passenger');
       setShowQuickRouteModal(true);
     } else {
@@ -443,8 +538,8 @@ export default function Home() {
 
     setNotification({
       type: 'success',
-      title: 'Welcome Back, ' + userToLogin.name + '!',
-      message: 'You are now signed in as a ' + userToLogin.role.toLowerCase() + '.',
+      title: `Welcome Back, ${matchedUser.name}!`,
+      message: `You are signed in via registered email (${matchedUser.email}).`,
     });
   };
 
@@ -457,7 +552,7 @@ export default function Home() {
       setNotification({
         type: 'success',
         title: 'Demo Passenger Active',
-        message: 'Signed in as Muhammad Ali (Karachi).',
+        message: 'Signed in as Muhammad Ali (ali@example.com).',
       });
     } else {
       setCurrentUser(INITIAL_DEMO_DRIVER);
@@ -465,7 +560,7 @@ export default function Home() {
       setNotification({
         type: 'success',
         title: 'Demo Driver Active',
-        message: 'Signed in as Captain Tariq Khan (Toyota Corolla AC, Verified).',
+        message: 'Signed in as Captain Tariq Khan (tariq.captain@example.com).',
       });
     }
   };
@@ -561,7 +656,7 @@ export default function Home() {
       const newRequest = createBookingRequest({
         id: generateClientUniqueId('req'),
         ride: currentRide,
-        passengerId: `${currentUser.name} (${currentUser.phone})`,
+        passengerId: `${currentUser.name} (Verified Passenger #${currentUser.id.slice(-4)})`,
         bookingType,
         requestedSeats: seatsToBook,
         totalPrice: price,
@@ -869,12 +964,12 @@ export default function Home() {
             <button
               onClick={() => setAuthView('REGISTER')}
               className={`py-2 text-xs font-black rounded-xl transition ${
-                authView === 'REGISTER'
+                authView === 'REGISTER' || authView === 'VERIFY_OTP'
                   ? 'bg-emerald-600 text-white shadow-xs'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              New Registration
+              New Registration (Email OTP)
             </button>
             <button
               onClick={() => setAuthView('LOGIN')}
@@ -884,11 +979,11 @@ export default function Home() {
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              Sign In (Existing)
+              Sign In (Email Only)
             </button>
           </div>
 
-          {/* REGISTRATION FORM */}
+          {/* STEP 1: REGISTRATION FORM */}
           {authView === 'REGISTER' && (
             <form onSubmit={handleRegister} className="space-y-4">
               {/* Role Picker: Passenger vs Driver */}
@@ -941,17 +1036,30 @@ export default function Home() {
                   />
                 </div>
 
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                    Email Address (6-Digit OTP Will Be Sent Here)
+                  </label>
+                  <input
+                    type="email"
+                    value={regEmail}
+                    onChange={(e) => setRegEmail(e.target.value)}
+                    placeholder="e.g. ali@example.com"
+                    required
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="block text-[11px] font-bold text-slate-300 mb-1">
-                      Mobile (03xx-xxxxxxx)
+                      Mobile Number
                     </label>
                     <input
                       type="tel"
                       value={regPhone}
                       onChange={(e) => setRegPhone(e.target.value)}
                       placeholder="0300-1234567"
-                      required
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                     />
                   </div>
@@ -1087,31 +1195,109 @@ export default function Home() {
                 </div>
               )}
 
-              {/* Submit Registration */}
+              {/* Submit Registration -> Leads to OTP Step */}
               <button
                 type="submit"
                 className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3.5 px-4 rounded-2xl shadow-lg transition text-xs uppercase tracking-wider cursor-pointer"
               >
-                Complete Registration & Enter
+                Send 6-Digit Email OTP →
               </button>
             </form>
           )}
 
-          {/* SIGN IN FORM */}
+          {/* STEP 2: EMAIL OTP VERIFICATION FORM */}
+          {authView === 'VERIFY_OTP' && (
+            <div className="space-y-4">
+              <div className="text-center space-y-1">
+                <span className="text-3xl block">📧</span>
+                <h2 className="text-base font-extrabold text-white">Check Your Email</h2>
+                <p className="text-xs text-slate-300">
+                  We have sent a 6-digit verification code to:
+                </p>
+                <div className="font-mono text-xs font-black text-emerald-400 bg-emerald-950/60 py-1 px-3 rounded-lg border border-emerald-800/80 inline-block">
+                  {pendingUser?.email || regEmail}
+                </div>
+              </div>
+
+              {/* Demo auto-fill helper card */}
+              <div className="bg-slate-900 border border-emerald-500/50 p-3 rounded-2xl space-y-1.5 text-center">
+                <div className="text-[11px] text-slate-400 font-bold uppercase tracking-wider">
+                  Test Environment Verification Code
+                </div>
+                <div className="font-mono text-2xl font-black text-emerald-400 tracking-widest">
+                  {generatedOtp}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setRegOtp(generatedOtp)}
+                  className="text-[11px] text-emerald-300 hover:text-emerald-200 underline font-semibold cursor-pointer"
+                >
+                  Click to auto-fill code
+                </button>
+              </div>
+
+              <form onSubmit={handleVerifyOtp} className="space-y-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-300 mb-1 text-center">
+                    Enter 6-Digit OTP Code
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={6}
+                    value={regOtp}
+                    onChange={(e) => setRegOtp(e.target.value.replace(/\D/g, ''))}
+                    placeholder="------"
+                    autoFocus
+                    required
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-3 text-center text-xl font-mono font-black text-white tracking-widest placeholder-slate-600 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3.5 px-4 rounded-2xl shadow-lg transition text-xs uppercase tracking-wider cursor-pointer"
+                >
+                  Verify Email & Enter ReturnRide
+                </button>
+
+                <div className="flex justify-between items-center pt-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={handleResendOtp}
+                    className="text-slate-400 hover:text-white underline cursor-pointer"
+                  >
+                    Resend Code
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAuthView('REGISTER')}
+                    className="text-slate-400 hover:text-white underline cursor-pointer"
+                  >
+                    Change Email / Edit Details
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* SIGN IN FORM (EMAIL ONLY) */}
           {authView === 'LOGIN' && (
             <form onSubmit={handleLogin} className="space-y-4">
               <div>
                 <label className="block text-[11px] font-bold text-slate-300 mb-1">
-                  Enter Your Registered Phone Number:
+                  Enter Your Registered Email Address:
                 </label>
                 <input
-                  type="tel"
-                  value={loginPhone}
-                  onChange={(e) => setLoginPhone(e.target.value)}
-                  placeholder="0300-1234567"
+                  type="email"
+                  value={loginEmail}
+                  onChange={(e) => setLoginEmail(e.target.value)}
+                  placeholder="e.g. ali@example.com"
                   required
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-bold"
                 />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Instant passwordless access. No phone number or password needed.
+                </p>
               </div>
 
               <button
@@ -1126,22 +1312,24 @@ export default function Home() {
           {/* 1-Tap Demo Switchers */}
           <div className="pt-2 border-t border-slate-700/80 text-center space-y-2">
             <span className="text-[10px] text-slate-400 font-bold uppercase">
-              Or Try Demo Accounts with 1 Click:
+              Or Instant 1-Click Demo Accounts:
             </span>
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
                 onClick={() => handleDemoLogin('PASSENGER')}
-                className="bg-slate-700 hover:bg-slate-600 text-white py-2 px-3 rounded-xl text-xs font-bold transition"
+                className="bg-slate-700 hover:bg-slate-600 text-white py-2 px-3 rounded-xl text-xs font-bold transition flex flex-col items-center"
               >
-                🙋‍♂️ Demo Passenger
+                <span>🙋‍♂️ Demo Passenger</span>
+                <span className="text-[10px] text-slate-400 font-normal">ali@example.com</span>
               </button>
               <button
                 type="button"
                 onClick={() => handleDemoLogin('DRIVER')}
-                className="bg-slate-700 hover:bg-slate-600 text-white py-2 px-3 rounded-xl text-xs font-bold transition"
+                className="bg-slate-700 hover:bg-slate-600 text-white py-2 px-3 rounded-xl text-xs font-bold transition flex flex-col items-center"
               >
-                🚘 Demo Driver (Verified)
+                <span>🚘 Demo Driver</span>
+                <span className="text-[10px] text-slate-400 font-normal">tariq.captain@example.com</span>
               </button>
             </div>
           </div>
@@ -1606,25 +1794,36 @@ export default function Home() {
                         <span className="text-[10px] text-slate-400">ID: {b.id}</span>
                       </div>
 
-                      {/* Direct Call & WhatsApp when accepted */}
+                      {/* In-App Protection & Boarding Checkpoint (Disintermediation-Free) */}
                       {b.status === 'ACCEPTED' && (
-                        <div className="mt-2.5 pt-2 border-t border-emerald-200 flex flex-wrap gap-2">
-                          <a
-                            href="tel:03009876543"
-                            className="flex-1 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs py-2 px-3 rounded-lg text-center flex items-center justify-center gap-1.5 transition"
-                          >
-                            <span>📞</span>
-                            <span>Call Driver</span>
-                          </a>
-                          <a
-                            href="https://wa.me/923009876543"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="bg-emerald-100 hover:bg-emerald-200 text-emerald-900 font-bold text-xs py-2 px-3 rounded-lg text-center flex items-center justify-center gap-1 transition"
-                          >
-                            <span>💬</span>
-                            <span>WhatsApp</span>
-                          </a>
+                        <div className="mt-2.5 pt-2 border-t border-emerald-200 space-y-2">
+                          <div className="bg-emerald-50 text-emerald-950 p-2.5 rounded-xl border border-emerald-300 text-xs flex items-start gap-2">
+                            <span className="text-base">🛡️</span>
+                            <div>
+                              <div className="font-extrabold text-[11px] uppercase tracking-wide text-emerald-900">
+                                ReturnRide In-App Trip Protection Active
+                              </div>
+                              <p className="text-[11px] text-emerald-800 mt-0.5 leading-relaxed">
+                                All trip coordination is protected inside ReturnRide to secure your fare and reliability score. External contact numbers are masked for passenger &amp; platform safety.
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="bg-white p-2.5 rounded-xl border border-slate-200 flex items-center justify-between text-xs">
+                            <span className="font-bold text-slate-700 flex items-center gap-1.5">
+                              <span>📍</span> Boarding Checkpoint:
+                            </span>
+                            <span className="font-extrabold text-slate-900">Designated Terminal Hub</span>
+                          </div>
+
+                          <div className="bg-emerald-100/60 p-2.5 rounded-xl border border-emerald-200 flex items-center justify-between text-xs">
+                            <span className="font-bold text-emerald-900 flex items-center gap-1.5">
+                              <span>💵</span> Cash Due on Boarding:
+                            </span>
+                            <span className="font-extrabold text-emerald-800 text-sm">
+                              Rs. {b.totalPrice.toLocaleString()} (Direct to Captain)
+                            </span>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -2144,18 +2343,26 @@ export default function Home() {
                         </div>
                       )}
 
-                      {/* Cash to collect & Cancel option */}
+                      {/* Cash to collect & Disintermediation Protection */}
                       {req.status === 'ACCEPTED' && (
-                        <div className="mt-3 pt-2 border-t border-emerald-200 flex items-center justify-between">
-                          <span className="text-[11px] font-bold text-emerald-800">
-                            Cash to collect: Rs. {req.totalPrice.toLocaleString()}
-                          </span>
-                          <button
-                            onClick={() => handleCancelBooking(req)}
-                            className="text-[11px] font-bold text-rose-700 hover:text-rose-900 hover:underline"
-                          >
-                            Cancel Booking
-                          </button>
+                        <div className="mt-3 pt-2.5 border-t border-emerald-200 space-y-2">
+                          <div className="bg-emerald-50 text-emerald-900 p-2 rounded-lg border border-emerald-200 text-[11px] flex items-center justify-between">
+                            <span className="font-bold flex items-center gap-1">
+                              <span>🛡️</span> Protected In-App Booking
+                            </span>
+                            <span className="font-extrabold text-emerald-800">
+                              Cash to collect: Rs. {req.totalPrice.toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between text-[11px] text-slate-500">
+                            <span>Passenger boards at designated terminal hub</span>
+                            <button
+                              onClick={() => handleCancelBooking(req)}
+                              className="font-bold text-rose-700 hover:text-rose-900 hover:underline cursor-pointer"
+                            >
+                              Cancel Booking
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -2187,7 +2394,9 @@ export default function Home() {
                   <p className="text-xs text-slate-500 font-bold">
                     {currentUser.role === 'DRIVER' ? '🚘 Captain / Driver' : '🙋‍♂️ Passenger'} • {currentUser.city || 'Pakistan'}
                   </p>
-                  <p className="text-xs text-emerald-800 font-extrabold mt-0.5">{currentUser.phone}</p>
+                  <p className="text-xs text-emerald-800 font-extrabold mt-0.5">
+                    ✉️ {currentUser.email} • 📞 {currentUser.phone}
+                  </p>
                 </div>
               </div>
 
