@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test --experimental-strip-types src/lib/booking-engine.test.ts"
+    "test": "node --test --experimental-strip-types src/lib/booking-engine.test.ts src/lib/reliability-engine.test.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

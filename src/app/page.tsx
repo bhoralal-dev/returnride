@@ -1,16 +1,27 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
+import Link from 'next/link';
 import {
   acceptBookingRequest,
   rejectBookingRequest,
   cancelConfirmedBooking,
   cancelRide,
-  switchRideBookingMode,
   createBookingRequest,
   calculateAvailableSeats,
   BookingEngineError,
 } from '@/lib/booking-engine';
+import {
+  evaluateUserReliability,
+  checkUserActionEligibility,
+  createCancellationEvent,
+  submitEmergencyAppeal,
+} from '@/lib/reliability-engine';
+import type {
+  CancellationEvent,
+  CancellationAppeal,
+  EmergencyReasonCategory,
+} from '@/types/reliability';
 import type {
   Ride,
   BookingRequest,
@@ -208,6 +219,10 @@ const INITIAL_RIDES: Ride[] = [
   },
 ];
 
+function generateClientUniqueId(prefix: string): string {
+  return `${prefix}-${Math.random().toString(36).substring(2, 8)}`;
+}
+
 export default function Home() {
   // Session & Auth state (null = not logged in, requires registration/login)
   const [currentUser, setCurrentUser] = useState<AppUserProfile | null>(null);
@@ -261,6 +276,14 @@ export default function Home() {
   const [driverPostTime, setDriverPostTime] = useState<string>('07:00 AM');
   const [driverPostNotes, setDriverPostNotes] = useState<string>('Clean AC car with luggage trunk.');
 
+  // Repeat Cancellation & Reliability State
+  const [cancellationEvents, setCancellationEvents] = useState<CancellationEvent[]>([]);
+  const [appeals, setAppeals] = useState<CancellationAppeal[]>([]);
+  const [showAppealModal, setShowAppealModal] = useState(false);
+  const [appealCategory, setAppealCategory] = useState<EmergencyReasonCategory>('MEDICAL');
+  const [appealStatement, setAppealStatement] = useState('');
+  const [selectedEventForAppeal, setSelectedEventForAppeal] = useState<CancellationEvent | null>(null);
+
   // Notification Toast
   const [notification, setNotification] = useState<{
     type: 'success' | 'error' | 'info';
@@ -272,25 +295,35 @@ export default function Home() {
     message: 'Welcome to ReturnRide. Safe intercity ride sharing nationwide.',
   });
 
-  // Load state from localStorage on client mount
+  // Load state from localStorage on client mount (scheduled asynchronously to prevent sync effect re-renders)
   useEffect(() => {
     try {
       const savedUser = localStorage.getItem('returnride_user');
       const savedRides = localStorage.getItem('returnride_rides');
       const savedBookings = localStorage.getItem('returnride_bookings');
-      if (savedUser) {
-        const parsedUser = JSON.parse(savedUser);
-        setCurrentUser(parsedUser);
-        if (parsedUser.role === 'PASSENGER') {
-          setShowQuickRouteModal(true);
+      const savedEvents = localStorage.getItem('returnride_canc_events');
+      const savedAppeals = localStorage.getItem('returnride_appeals');
+
+      const timer = setTimeout(() => {
+        if (savedUser) {
+          const parsedUser = JSON.parse(savedUser);
+          setCurrentUser(parsedUser);
+          if (parsedUser.role === 'PASSENGER') {
+            setShowQuickRouteModal(true);
+          }
         }
-      }
-      if (savedRides) setRides(JSON.parse(savedRides));
-      if (savedBookings) setBookings(JSON.parse(savedBookings));
+        if (savedRides) setRides(JSON.parse(savedRides));
+        if (savedBookings) setBookings(JSON.parse(savedBookings));
+        if (savedEvents) setCancellationEvents(JSON.parse(savedEvents));
+        if (savedAppeals) setAppeals(JSON.parse(savedAppeals));
+        setIsClientLoaded(true);
+      }, 0);
+
+      return () => clearTimeout(timer);
     } catch {
-      // Ignore
+      const fallbackTimer = setTimeout(() => setIsClientLoaded(true), 0);
+      return () => clearTimeout(fallbackTimer);
     }
-    setIsClientLoaded(true);
   }, []);
 
   // Save state to localStorage
@@ -304,10 +337,24 @@ export default function Home() {
       }
       localStorage.setItem('returnride_rides', JSON.stringify(rides));
       localStorage.setItem('returnride_bookings', JSON.stringify(bookings));
+      localStorage.setItem('returnride_canc_events', JSON.stringify(cancellationEvents));
+      localStorage.setItem('returnride_appeals', JSON.stringify(appeals));
     } catch {
       // Ignore
     }
-  }, [currentUser, rides, bookings, isClientLoaded]);
+  }, [currentUser, rides, bookings, cancellationEvents, appeals, isClientLoaded]);
+
+  // Current User Evaluated Reliability Profile
+  const userReliability = useMemo(() => {
+    if (!currentUser) return null;
+    return evaluateUserReliability({
+      userId: currentUser.id,
+      userRole: currentUser.role,
+      totalCompletedRides: currentUser.role === 'DRIVER' ? 4 : 2,
+      cancellationEvents,
+      appeals,
+    });
+  }, [currentUser, cancellationEvents, appeals]);
 
   // Handle Registration
   const handleRegister = (e: React.FormEvent) => {
@@ -323,7 +370,7 @@ export default function Home() {
     }
 
     const newUser: AppUserProfile = {
-      id: `usr-${Date.now().toString().slice(-4)}`,
+      id: generateClientUniqueId('usr'),
       name: regName.trim(),
       phone: regPhone.trim(),
       role: authRoleChoice,
@@ -491,12 +538,28 @@ export default function Home() {
   const handleCreateRequest = (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) return;
+
+    // Reliability Check Guard
+    if (userReliability) {
+      const eligibility = checkUserActionEligibility(userReliability);
+      if (!eligibility.isAllowed) {
+        setNotification({
+          type: 'error',
+          title: 'Booking Restricted',
+          message:
+            eligibility.rejectionReason ||
+            'Your account is currently restricted from submitting new bookings due to repeat cancellations.',
+        });
+        return;
+      }
+    }
+
     try {
       const seatsToBook = bookingType === 'WHOLE_CAR' ? 1 : seatsRequested;
       const price = bookingType === 'WHOLE_CAR' ? currentRide.wholeCarPrice : (currentRide.seatPrice || 0) * seatsToBook;
 
       const newRequest = createBookingRequest({
-        id: `req-${Date.now().toString().slice(-4)}`,
+        id: generateClientUniqueId('req'),
         ride: currentRide,
         passengerId: `${currentUser.name} (${currentUser.phone})`,
         bookingType,
@@ -577,30 +640,134 @@ export default function Home() {
     }
   };
 
-  // Driver Cancel Booking Handler
+  // Driver or Passenger Cancel Booking Handler with Reliability Tracking
   const handleCancelBooking = (booking: BookingRequest) => {
     try {
       const targetRide = rides.find((r) => r.id === booking.rideId);
       if (!targetRide) return;
 
+      const roleCancelling = currentUser?.role || 'DRIVER';
+
       const result = cancelConfirmedBooking({
         ride: targetRide,
         booking,
-        cancelledBy: 'DRIVER',
-        reason: 'Passenger requested cancellation',
+        cancelledBy: roleCancelling === 'PASSENGER' ? 'PASSENGER' : 'DRIVER',
+        reason: 'User cancelled booking',
       });
 
       setRides((prev) => prev.map((r) => (r.id === result.updatedRide.id ? result.updatedRide : r)));
       setBookings((prev) => prev.map((b) => (b.id === booking.id ? result.updatedBooking : b)));
-      setNotification({
-        type: 'info',
-        title: 'Booking Cancelled',
-        message: 'The booking was cancelled and occupied seats released.',
-      });
+
+      // Record Cancellation Event in Reliability Engine
+      if (currentUser) {
+        const event = createCancellationEvent({
+          id: generateClientUniqueId('canc'),
+          bookingId: booking.id,
+          rideId: targetRide.id,
+          userId: currentUser.id,
+          userRole: currentUser.role,
+          category: roleCancelling === 'PASSENGER' ? 'PASSENGER_VOLUNTARY' : 'DRIVER_SEAT_CANCEL',
+          reason: 'Booking cancellation',
+          departureTime: targetRide.departureTime,
+        });
+
+        setCancellationEvents((prev) => [event, ...prev]);
+
+        if (event.timingRisk === 'LAST_MINUTE') {
+          setSelectedEventForAppeal(event);
+          setNotification({
+            type: 'error',
+            title: 'Last-Minute Cancellation Recorded',
+            message:
+              'Cancelling within 4 hours of departure affects reliability scores. If this was a legitimate emergency (medical, breakdown), you can submit an appeal below.',
+          });
+        } else {
+          setNotification({
+            type: 'info',
+            title: 'Booking Cancelled',
+            message: 'The booking was cancelled and occupied seats released.',
+          });
+        }
+      }
     } catch (err: unknown) {
       if (err instanceof BookingEngineError) {
         setNotification({ type: 'error', title: 'Error', message: err.message });
       }
+    }
+  };
+
+  // Driver Cancel Published Ride Handler (Whole Trip Cancellation)
+  const handleCancelPublishedRide = (rideToCancel: Ride) => {
+    if (!currentUser) return;
+    try {
+      const result = cancelRide({
+        ride: rideToCancel,
+        driverId: currentUser.id,
+        confirmedBookings: bookings,
+        reason: 'Captain cancelled journey',
+      });
+
+      setRides((prev) => prev.map((r) => (r.id === result.updatedRide.id ? result.updatedRide : r)));
+      setBookings((prev) =>
+        prev.map((b) => {
+          const cancelled = result.cancelledBookings.find((cb) => cb.id === b.id);
+          if (cancelled) return cancelled;
+          const autoRej = result.rejectedPendingRequests.find((ar) => ar.id === b.id);
+          if (autoRej) return autoRej;
+          return b;
+        })
+      );
+
+      const event = createCancellationEvent({
+        id: generateClientUniqueId('canc-ride'),
+        rideId: rideToCancel.id,
+        userId: currentUser.id,
+        userRole: 'DRIVER',
+        category: 'DRIVER_RIDE_CANCEL',
+        reason: 'Captain cancelled published ride',
+        departureTime: rideToCancel.departureTime,
+      });
+
+      setCancellationEvents((prev) => [event, ...prev]);
+
+      setNotification({
+        type: 'info',
+        title: 'Ride Cancelled',
+        message: 'Your published ride was cancelled. All confirmed passengers have been notified.',
+      });
+    } catch (err: unknown) {
+      if (err instanceof BookingEngineError) {
+        setNotification({ type: 'error', title: 'Cannot Cancel Ride', message: err.message });
+      }
+    }
+  };
+
+  // Submit Emergency Appeal Handler
+  const handleEmergencyAppealSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedEventForAppeal || !currentUser) return;
+
+    try {
+      const appeal = submitEmergencyAppeal({
+        id: generateClientUniqueId('appeal'),
+        cancellationEventId: selectedEventForAppeal.id,
+        userId: currentUser.id,
+        emergencyCategory: appealCategory,
+        statement: appealStatement,
+      });
+
+      setAppeals((prev) => [appeal, ...prev]);
+      setShowAppealModal(false);
+      setAppealStatement('');
+      setSelectedEventForAppeal(null);
+
+      setNotification({
+        type: 'success',
+        title: 'Emergency Appeal Submitted',
+        message: 'Your emergency appeal has been submitted for administrative review. Thank you.',
+      });
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Invalid appeal statement');
     }
   };
 
@@ -609,10 +776,25 @@ export default function Home() {
     e.preventDefault();
     if (!currentUser) return;
 
+    // Reliability Check Guard
+    if (userReliability) {
+      const eligibility = checkUserActionEligibility(userReliability);
+      if (!eligibility.isAllowed) {
+        setNotification({
+          type: 'error',
+          title: 'Publishing Restricted',
+          message:
+            eligibility.rejectionReason ||
+            'Your account is temporarily restricted from publishing rides due to repeat cancellations.',
+        });
+        return;
+      }
+    }
+
     const newRide: Ride = {
-      id: `ride-${Date.now().toString().slice(-4)}`,
+      id: generateClientUniqueId('ride'),
       driverId: currentUser.id,
-      vehicleId: `veh-${Date.now().toString().slice(-4)}`,
+      vehicleId: generateClientUniqueId('veh'),
       originLocationId: driverPostOrigin,
       destinationLocationId: driverPostDest,
       departureTime: '2026-11-03T08:00:00Z',
@@ -788,6 +970,19 @@ export default function Home() {
                     </select>
                   </div>
                 </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                    Emergency Contact Number (Family/Relative)
+                  </label>
+                  <input
+                    type="tel"
+                    value={regEmergency}
+                    onChange={(e) => setRegEmergency(e.target.value)}
+                    placeholder="0300-1122334"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500"
+                  />
+                </div>
               </div>
 
               {/* DRIVER MANDATORY VERIFICATION & SECURITY FIELDS */}
@@ -842,7 +1037,21 @@ export default function Home() {
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-300 mb-1">Passenger Seats</label>
+                      <label className="block text-[11px] font-bold text-slate-300 mb-1">License Plate</label>
+                      <input
+                        type="text"
+                        value={regCarPlate}
+                        onChange={(e) => setRegCarPlate(e.target.value)}
+                        placeholder="LEB-4592"
+                        required
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-300 mb-1">Seats</label>
                       <input
                         type="number"
                         min="1"
@@ -850,8 +1059,29 @@ export default function Home() {
                         value={regCarCapacity}
                         onChange={(e) => setRegCarCapacity(Number(e.target.value))}
                         required
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2 py-2 text-xs text-white"
                       />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-300 mb-1">Color</label>
+                      <input
+                        type="text"
+                        value={regCarColor}
+                        onChange={(e) => setRegCarColor(e.target.value)}
+                        placeholder="White"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2 py-2 text-xs text-white placeholder-slate-500"
+                      />
+                    </div>
+                    <div className="flex items-center pt-5">
+                      <label className="flex items-center gap-1.5 cursor-pointer text-[11px] text-slate-300">
+                        <input
+                          type="checkbox"
+                          checked={regCarAc}
+                          onChange={(e) => setRegCarAc(e.target.checked)}
+                          className="w-4 h-4 accent-emerald-500 rounded"
+                        />
+                        <span>AC</span>
+                      </label>
                     </div>
                   </div>
                 </div>
@@ -1036,6 +1266,45 @@ export default function Home() {
             >
               ✕
             </button>
+          </div>
+        )}
+
+        {/* Reliability Banner (Graduated Restrictions & Warnings) */}
+        {userReliability && userReliability.restrictionLevel !== 'NORMAL' && (
+          <div
+            className={`p-3.5 rounded-2xl border flex items-start gap-2.5 shadow-xs ${
+              userReliability.restrictionLevel === 'TEMPORARY_RESTRICTION'
+                ? 'bg-rose-50 border-rose-300 text-rose-900'
+                : 'bg-amber-50 border-amber-300 text-amber-900'
+            }`}
+          >
+            <span className="text-xl">
+              {userReliability.restrictionLevel === 'TEMPORARY_RESTRICTION' ? '⏳' : '⚠️'}
+            </span>
+            <div className="flex-1">
+              <div className="flex items-center justify-between">
+                <span className="font-extrabold text-xs uppercase tracking-wider">
+                  {userReliability.restrictionLevel === 'TEMPORARY_RESTRICTION'
+                    ? 'Temporary Cooling-off Active'
+                    : 'Reliability Warning'}
+                </span>
+                <span className="text-[11px] font-bold">
+                  Score: {userReliability.score}/100 ({userReliability.tier})
+                </span>
+              </div>
+              <p className="text-xs mt-0.5 leading-relaxed">
+                {userReliability.restrictionReason}
+              </p>
+              {selectedEventForAppeal && (
+                <button
+                  type="button"
+                  onClick={() => setShowAppealModal(true)}
+                  className="mt-2 text-xs font-black text-white bg-slate-900 hover:bg-black px-3 py-1.5 rounded-xl transition cursor-pointer"
+                >
+                  Submit Emergency Appeal ➔
+                </button>
+              )}
+            </div>
           </div>
         )}
 
@@ -1715,6 +1984,31 @@ export default function Home() {
                     </div>
                   </div>
 
+                  {/* Time and Notes */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">Departure Time</label>
+                      <input
+                        type="text"
+                        value={driverPostTime}
+                        onChange={(e) => setDriverPostTime(e.target.value)}
+                        placeholder="07:00 AM"
+                        required
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-semibold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">Trip Details & Route Notes</label>
+                      <input
+                        type="text"
+                        value={driverPostNotes}
+                        onChange={(e) => setDriverPostNotes(e.target.value)}
+                        placeholder="Luggage space, AC"
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-semibold"
+                      />
+                    </div>
+                  </div>
+
                   <button
                     type="submit"
                     className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-extrabold text-xs py-3.5 rounded-xl shadow-xs transition cursor-pointer"
@@ -1722,6 +2016,54 @@ export default function Home() {
                     Publish Ride Online (Passengers Can Book)
                   </button>
                 </form>
+              </div>
+            )}
+
+            {/* My Active Published Journeys (With Cancel Option) */}
+            {currentUser.role === 'DRIVER' && (
+              <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 space-y-3">
+                <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-1.5">
+                  <span>🚗</span>
+                  <span>My Listed Journeys ({rides.filter((r) => r.driverId === currentUser.id).length})</span>
+                </h3>
+
+                {rides.filter((r) => r.driverId === currentUser.id).length === 0 ? (
+                  <p className="text-xs text-slate-400 italic">No rides listed yet by your account.</p>
+                ) : (
+                  <div className="space-y-2.5">
+                    {rides
+                      .filter((r) => r.driverId === currentUser.id)
+                      .map((myRide) => {
+                        const oName = NATIONWIDE_CITIES.find((c) => c.id === myRide.originLocationId)?.name || 'Origin';
+                        const dName = NATIONWIDE_CITIES.find((c) => c.id === myRide.destinationLocationId)?.name || 'Destination';
+                        return (
+                          <div
+                            key={myRide.id}
+                            className="p-3 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between"
+                          >
+                            <div>
+                              <div className="font-extrabold text-xs text-slate-900">
+                                {oName} ➔ {dName}
+                              </div>
+                              <span className="text-[10px] text-slate-500 font-medium">
+                                Status: {myRide.status} • Booked: {myRide.bookedSeatsCount}/{myRide.capacity} Seats
+                              </span>
+                            </div>
+
+                            {myRide.status === 'PUBLISHED' && (
+                              <button
+                                type="button"
+                                onClick={() => handleCancelPublishedRide(myRide)}
+                                className="text-[11px] bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-2.5 py-1 rounded-lg font-bold transition"
+                              >
+                                Cancel Ride
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
               </div>
             )}
 
@@ -2063,6 +2405,103 @@ export default function Home() {
             </div>
           </div>
         )}
+
+        {/* MODAL: EMERGENCY CANCELLATION APPEAL */}
+        {showAppealModal && selectedEventForAppeal && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl border border-slate-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-black text-slate-900 leading-tight">
+                    Emergency Cancellation Appeal
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium mt-0.5">
+                    Submit verified emergency details to waive reliability penalties:
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAppealModal(false)}
+                  className="text-slate-400 hover:text-slate-700 font-bold text-lg p-1"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <form onSubmit={handleEmergencyAppealSubmit} className="space-y-3 pt-1">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Emergency Nature:
+                  </label>
+                  <select
+                    value={appealCategory}
+                    onChange={(e) => setAppealCategory(e.target.value as EmergencyReasonCategory)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold"
+                  >
+                    <option value="MEDICAL">Medical Emergency / Hospitalization</option>
+                    <option value="VEHICLE_BREAKDOWN">Vehicle Breakdown / Mechanical Failure</option>
+                    <option value="ROAD_BLOCK_WEATHER">Roadblock / Severe Weather / Highway Closure</option>
+                    <option value="FAMILY_EMERGENCY">Urgent Family Bereavement / Emergency</option>
+                    <option value="OTHER">Other Documented Emergency</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Explanation & Circumstances:
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={appealStatement}
+                    onChange={(e) => setAppealStatement(e.target.value)}
+                    placeholder="Describe the emergency circumstances that prevented travel..."
+                    required
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                  <span className="text-[10px] text-slate-400 block mt-1">
+                    Approved appeals completely restore lost reliability points.
+                  </span>
+                </div>
+
+                <div className="flex gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowAppealModal(false)}
+                    className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-3 rounded-xl transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-3 rounded-xl shadow-xs transition"
+                  >
+                    Submit Appeal
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Footer Legal & Operational Links */}
+        <footer className="pt-6 border-t border-slate-200 text-center space-y-2">
+          <div className="flex justify-center items-center gap-3 text-xs font-bold text-emerald-800">
+            <Link href="/privacy" className="hover:underline">
+              Privacy Policy
+            </Link>
+            <span>•</span>
+            <Link href="/terms" className="hover:underline">
+              Terms of Service
+            </Link>
+            <span>•</span>
+            <a href="mailto:support@returnride.pk" className="hover:underline">
+              Support Helpline
+            </a>
+          </div>
+          <p className="text-[11px] text-slate-400">
+            ReturnRide Pakistan © 2026 • Nationwide Intercity Marketplace • Direct Cash Pilot
+          </p>
+        </footer>
       </main>
     </div>
   );

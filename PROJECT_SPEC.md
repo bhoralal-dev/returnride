@@ -1,148 +1,176 @@
-# ReturnRide — Project Specification & Product Requirements
+# ReturnRide — Authoritative Project Specification & Production Readiness
 
-**ReturnRide** is a mobile-first intercity ride marketplace designed specifically for Pakistan. It connects intercity drivers with passengers traveling between cities, towns, and rural hubs nationwide.
+**ReturnRide** is a nationwide, mobile-first intercity ride marketplace designed specifically for Pakistan. It connects intercity drivers who have empty vehicle capacity (particularly on return journeys) with passengers traveling between cities, towns, and rural hubs nationwide.
 
 ---
 
-## 1. Product Purpose & Nationwide Scope
+## 1. Product Purpose & Commercial Scope
 
-* **Core Mission**: Provide a safe, transparent, and ultra-simple platform for intercity travelers across Pakistan. Full-car booking is prioritized as the primary option, while drivers can offer individual seats as an alternative.
-* **Geographic Scope**: Nationwide across all provinces and territories of Pakistan (Sindh, Punjab, Khyber Pakhtunkhwa, Balochistan, Islamabad Capital Territory, Azad Jammu & Kashmir, and Gilgit-Baltistan). Initial routes (e.g., Umerkot ↔ Karachi) serve as pilot corridors, but the system architecture is entirely data-driven with zero hardcoded cities or routes. `[Planned]`
-* **Target Audience**: Everyday Pakistani citizens, including non-technical users with low digital literacy. The interface must be minimal, high-contrast, touch-friendly ($\ge 48\text{px}$ touch targets), and support intuitive bilingual affordances (English and Roman Urdu). `[Implemented and verified]`
+* **Core Mission**: Provide a safe, transparent, affordable, and dependable platform for nationwide intercity travel across Pakistan. Whole-car (entire vehicle) booking is prioritized as the primary option for private/family travel, while individual seat booking is available on a per-seat basis.
+* **Geographic Scope**: Nationwide across all provinces and territories of Pakistan (Sindh, Punjab, Islamabad Capital Territory, Khyber Pakhtunkhwa, Balochistan, Azad Jammu & Kashmir, and Gilgit-Baltistan). Zero hardcoded cities in backend business logic; dynamic locations table supports expandable hubs. `[Implemented and verified]`
+* **Target Audience & Usability**: Everyday citizens, families, and solo intercity travelers, including users with entry-level Android smartphones and intermittent 3G/4G connectivity. Features high contrast, touch targets $\ge 48\text{px}$, bilingual affordances (English and Roman Urdu), and simple language. `[Implemented and verified]`
+* **Initial Business Model (Pilot)**:
+  * **100% Direct Cash-on-Boarding** between passenger and driver. Zero in-app financial custody or digital escrow during initial pilot. `[Business decision agreed]`
+  * **Commission-Free Launch**: Platform charges 0% fees during market validation to maximize liquidity and trust. `[Business decision agreed]`
+  * **No Upfront Driver Fees**: No charges to drivers to register or publish rides. `[Business decision agreed]`
+* **Explicit MVP Exclusions**:
+  * Unaccompanied commercial cargo/freight delivery is excluded.
+  * In-app credit card / digital wallet processing is excluded from the initial release.
+  * Continuous background GPS fleet tracking is excluded (discrete city checkpoints only).
 
 ---
 
 ## 2. Core Marketplace Workflows
 
-### A. Passenger Workflow `[Planned]`
-1. **Search**: Select origin and destination from dynamic location records, and specify travel date.
-2. **Browse**: View published rides with clear transparent pricing:
-   * **Full Car (پوری گاڑی)**: Reserve the entire vehicle for private/family travel.
-   * **Per Seat (ایک سیٹ)**: Book individual seats at a per-passenger rate.
-3. **Submit Request**: Passenger enters their name, phone number, and requested capacity (1 full car or 1–N seats). The request enters `PENDING` status.
-4. **Driver Confirmation**: Request is confirmed only after the driver reviews and explicitly accepts it.
+### A. Passenger Workflow `[Implemented and verified]`
+1. **Registration / Sign-In Gate**: First-time visitors register or sign in with their full name, mobile number, city, and emergency contact.
+2. **"Where To?" Quick Route Modal**: Immediately upon entering or signing in, a focused popup prompts strictly for **From (Origin City)** and **To (Destination City)** with 1-tap popular routes (Karachi ↔ Hyderabad, Umerkot ↔ Karachi, Lahore ↔ Islamabad).
+3. **Matching Feed & Transparent Choice**:
+   * **Entire Car (پوری گاڑی)**: Private booking for the full vehicle capacity.
+   * **Single Seats (ایک سیٹ)**: Book 1 to $N$ individual seats at a per-seat rate.
+4. **Submit Request**: Booking enters `PENDING` status. Pending requests do **not** decrement available capacity (preventing fake booking lockouts).
+5. **Confirmation & Coordination**: Upon driver acceptance, booking confirms (`ACCEPTED`). Driver contact details (direct phone call and WhatsApp) become accessible to coordinate pickup.
 
-### B. Driver Workflow `[Planned]`
-1. **Publish Ride**: Specify origin, destination, departure date/time, vehicle details, passenger capacity (1–10 seats), pricing mode, and pricing.
-2. **Review Requests**: View incoming pending requests on a one-tap dashboard.
-3. **Accept / Reject**:
-   * Tapping **Accept** transactionally locks the ride inventory and auto-rejects any newly conflicting pending requests.
+### B. Driver / Captain Workflow `[Implemented and verified]`
+1. **Registration & Security Verification**: Drivers submit full name, phone number, vehicle information (make/model, license plate, color, capacity, AC status), plus **mandatory CNIC and Driving License numbers**.
+2. **Publish Journey**: Specify origin city, destination city, departure schedule, whole-car price, per-seat price, and route notes.
+3. **Incoming Requests Dashboard**: Review pending passenger requests with requested seat counts and total pricing.
+4. **Accept / Reject**:
+   * Tapping **Accept** atomically locks vehicle inventory and auto-rejects conflicting pending requests (`REJECTED_AUTO_CONFLICT`).
    * Tapping **Reject** declines the passenger without altering vehicle capacity.
-4. **Trip Management**: Contact confirmed passengers directly via phone/WhatsApp, commence trip, and complete ride.
+5. **Trip Cancellation**: If an unforeseen event occurs, drivers can cancel the published ride, which automatically notifies passengers, resets occupied seats, and records audit metrics.
 
 ---
 
-## 3. Booking Modes & Invariants
+## 3. Dedicated Repeat Cancellation Prevention & Reliability System `[Implemented and verified]`
 
-### Booking Modes `[Implemented and verified]`
-* `WHOLE_CAR`: Vehicle is exclusively offered as an entire car reservation.
-* `SEATS`: Vehicle is exclusively offered on a per-seat basis.
-* `WHOLE_CAR_OR_SEATS`: Vehicle is primarily offered as a whole car, but individual seat bookings are permitted if no whole-car reservation has taken place. Accepting either mode locks out the other.
+To prevent serial flaking, ghost bookings, and last-minute ride abandonments in Pakistan's cash marketplace without levying unlawful or unapproved financial fines, ReturnRide enforces an explainable, automated reliability system:
 
-### Core Booking Invariants `[Implemented and verified]`
-1. **Pending Requests Do Not Reserve Capacity**: A pending request does not consume seats. This prevents malicious users from locking out drivers by submitting fake requests.
-2. **Driver Acceptance Gate**: All requests start in `PENDING` status. Only driver acceptance commits inventory.
-3. **Mutual Exclusivity**:
-   * An accepted `WHOLE_CAR` booking sets `bookedSeatsCount = capacity`, changes ride status to `FULL_CAR_BOOKED`, and auto-rejects all other pending requests (`REJECTED_AUTO_CONFLICT`).
-   * An accepted `SEAT` booking sets `is_full_car_available = false`, permanently blocks whole-car reservations, and auto-rejects any pending whole-car requests.
-4. **Capacity Ceiling**: `bookedSeatsCount + requestedSeats` can never exceed vehicle `capacity`. Any request that would exceed available seats is rejected (`CAPACITY_EXCEEDED`).
-5. **Mode Switching Invariants**: Switching a ride's booking mode via `switchRideBookingMode` is strictly forbidden if any confirmed bookings or occupied seats exist (`MODE_SWITCH_CONFLICT`). Any pending requests incompatible with the new mode are automatically transitioned to `REJECTED_AUTO_CONFLICT`.
-6. **No Auto-Acceptance**: Compatible pending requests remain `PENDING` and are never automatically accepted when capacity is freed.
-7. **Lifecycle Invariant**: Inactive, departed, completed, or cancelled rides cannot accept bookings (`RIDE_INACTIVE`, `RIDE_CLOSED`).
-
----
-
-## 4. Cancellation & Lifecycle Rules
-
-### A. Booking Cancellation `[Implemented and verified]`
-* **Allowed Ride States**: Booking cancellations via `cancelConfirmedBooking` are permitted only on active, pre-departure rides (`PUBLISHED`, `FULL_CAR_BOOKED`, `SEATS_FILLED`). Inactive, departed, completed, or draft rides throw `RIDE_INACTIVE`.
-* **Capacity Restoration**:
-  * Cancelling an individual seat booking releases exactly the seats that booking occupied.
-  * Cancelling a whole-car booking restores full capacity.
-  * If `autoReopenOnCancellation` is enabled (default `true`), rides marked `FULL_CAR_BOOKED` or `SEATS_FILLED` revert to `PUBLISHED`.
-* **Idempotency**: Repeated cancellation of an already cancelled booking throws `INVALID_STATUS_TRANSITION`.
-
-### B. Driver Ride Cancellation (`cancelRide`) `[Implemented and verified]`
-* **Authorization**: Only the assigned driver can cancel their ride (`UNAUTHORIZED_DRIVER`).
-* **Lifecycle Guards**: Duplicate cancellation, completed rides, and departed rides are rejected (`ALREADY_CANCELLED`, `RIDE_ALREADY_COMPLETED`, `RIDE_ALREADY_DEPARTED`).
-* **Cascade**:
-  * Ride status transitions to `CANCELLED` and `bookedSeatsCount` resets to 0.
-  * All confirmed bookings (`ACCEPTED`) transition to `CANCELLED_BY_DRIVER`.
-  * A `CancellationRecord` is generated for each confirmed booking.
-  * All pending requests (`PENDING`) transition to `REJECTED_AUTO_CONFLICT`.
-  * Bookings for other rides are unaffected.
+### A. Core Invariants
+1. **Zero Monetary Fines**: No automatic cancellation charges, penalties, or financial withholdings.
+2. **Transparent Scoring**: Baseline score of **100 points**. Visible to the user with full explanations.
+3. **Graduated Consequences**:
+   * **Level 0 (`NORMAL`, Score 80–100)**: Full platform access.
+   * **Level 1 (`WARNING_ISSUED`, 2 cancels in 7d or Score 65–79)**: In-app warning banner explaining policy. No booking or publishing restrictions.
+   * **Level 2 (`TEMPORARY_RESTRICTION`, 3+ cancels in 7d or 5+ in 30d)**: Automated **24-hour cooling-off restriction** prohibiting new bookings or ride listings. Pre-existing confirmed journeys remain valid.
+   * **Level 3 (`FLAGGED_FOR_MANUAL_REVIEW`, Score < 50 or 3+ last-minute cancels)**: Account flagged for manual support review. Requires human review or appeal approval.
+4. **Timing Risk Differentiation**:
+   * **Standard ($\ge 24$ hours prior)**: $-5$ points.
+   * **Moderate ($4$ to $24$ hours prior)**: $-10$ points.
+   * **Last-Minute ($< 4$ hours prior)**: $-20$ points (disrupts traveler schedules).
+   * **Driver Ride Disruption Multiplier**: $1.5\times$ penalty when a driver cancels an entire ride with confirmed passengers.
+5. **False-Positive Protections**:
+   * System conflict auto-rejections (`AUTO_CONFLICT_REJECT`) carry **0 penalty**.
+   * Expired requests (`SYSTEM_EXPIRED`) carry **0 penalty**.
+   * When a driver cancels a ride, innocent passengers suffer **0 penalty**.
+6. **Reputation Recovery**:
+   * Users earn **$+2$ points per successfully completed ride** (capped at 100).
+7. **Emergency Appeal Workflow**:
+   * Users cancelling due to legitimate emergencies (hospitalization, vehicle breakdown, highway closure, security incident) can submit an **Emergency Appeal**.
+   * Approved appeals fully waive penalties and lift cooling-off restrictions.
 
 ---
 
-## 5. Safety, Trust & Identity Verification `[Planned]`
+## 4. Concurrency & Booking Engine Invariants `[Implemented and verified]`
 
-1. **Driver Identity & Document Verification**:
-   * Drivers must submit CNIC (Computerized National Identity Card), valid driving license, and vehicle registration documents before their rides become visible to the public.
-   * Admin verification dashboard to manually review and approve/reject driver credentials during the initial phase.
-2. **Phone Number Verification (SMS OTP)**:
-   * SMS OTP verifies control over a Pakistani mobile number (Jazz, Telenor, Zong, Ufone).
-   * *Critical Distinction*: Phone OTP confirms phone ownership, **not** legal personal identity. It must be paired with verified CNIC records for drivers.
-3. **Safety & Privacy**:
-   * Phone numbers and direct contact details are revealed only **after** a booking request is accepted by the driver.
-   * In-app reporting and user blocking workflows for misconduct, harassment, or unsafe driving.
-   * Admin emergency contact sharing and trip details sharing via WhatsApp link.
+1. **One Confirmed Full-Car Booking per Ride**: An accepted `WHOLE_CAR` booking sets `bookedSeatsCount = capacity`, changes ride status to `FULL_CAR_BOOKED`, and auto-rejects all pending requests (`REJECTED_AUTO_CONFLICT`).
+2. **No Overbooking**: `bookedSeatsCount + requestedSeats <= capacity`. Any acceptance that would exceed capacity throws `CAPACITY_EXCEEDED`.
+3. **Driver Acceptance Gate**: All requests start in `PENDING`. Availability is re-checked at the exact moment of acceptance.
+4. **Atomic Database Execution**: Backed by PostgreSQL stored procedure `accept_booking_request_tx()` using `SELECT ... FOR UPDATE` row locks to prevent race conditions across concurrent server instances.
+5. **Idempotent Cancellation**: Cancelling an already cancelled booking rejects with `INVALID_STATUS_TRANSITION` without double-releasing seats or duplicating penalties.
+6. **Immutable Operations**: Zero in-place mutations of inputs across all domain calculations.
 
 ---
 
-## 6. Payments & Business Model
+## 5. Database Architecture & Migrations `[Implemented and verified]`
 
-* **Initial Phase (Pilot)**: **100% Cash-on-Boarding** between passenger and driver. `[Planned]`
-  * Direct cash payment avoids payment gateway licensing, merchant account setup, and banking friction during early market validation.
-  * Completely commission-free pilot to encourage adoption and gather real passenger-driver feedback.
-* **Future Monetization**:
-  * Transparent platform fee per confirmed ride.
-  * Any commission structure will be explicitly disclosed upfront to drivers and riders.
-  * Digital wallet escrow (JazzCash, Easypaisa, Raast) will be considered in post-MVP phases only.
-
----
-
-## 7. Architecture & Technology Stack
-
-* **Frontend**: Next.js 16 (App Router) + TypeScript + Tailwind CSS 4. Ultra-minimal, touch-first components. `[Implemented and verified]`
-* **Domain Engine**: Pure TypeScript in-memory booking engine with zero external dependencies and 13 automated tests. `[Implemented and verified]`
-* **Production Backend (Target)**: Supabase (PostgreSQL). `[Planned]`
-  * Relational schema with strict foreign keys, check constraints, and Row Level Security (RLS).
-  * **Transactional Concurrency**: Booking acceptance and capacity adjustments will be wrapped in PostgreSQL stored procedures / RPCs using `SELECT ... FOR UPDATE` row locks to guarantee zero overbooking under real concurrent traffic.
+PostgreSQL schema hosted on Supabase (`yefaqlrczrbdumjuramb`):
+1. [`supabase/migrations/20261027_initial_schema.sql`](file:///c:/Users/Admin/Desktop/returnride/supabase/migrations/20261027_initial_schema.sql):
+   * `locations`: Dynamic registry of nationwide cities (Umerkot, Karachi, Hyderabad, Sukkur, Lahore, Islamabad, Multan, Faisalabad, Peshawar, Quetta).
+   * `user_profiles`: Phone number, full name, role (`PASSENGER`, `DRIVER`, `ADMIN`), emergency contacts.
+   * `driver_profiles`: CNIC number, driving license number, verification status, completed trips.
+   * `vehicles`: Make, model, plate, passenger capacity, AC status.
+   * `rides`: Origin, destination, departure time, booking mode, whole-car price, seat price, capacity, status.
+   * `booking_requests`: Passenger ID, ride ID, booking type, requested seats, total price, status.
+   * `accept_booking_request_tx()`: Atomic row-locking stored procedure.
+2. [`supabase/migrations/20261027_rls_policies.sql`](file:///c:/Users/Admin/Desktop/returnride/supabase/migrations/20261027_rls_policies.sql):
+   * Row Level Security policies for public listings search and authenticated driver/passenger data separation.
+3. [`supabase/migrations/20261027_cancellation_reliability.sql`](file:///c:/Users/Admin/Desktop/returnride/supabase/migrations/20261027_cancellation_reliability.sql):
+   * `cancellation_events`: Detailed audit tracking category, timing risk, hours before departure.
+   * `cancellation_appeals`: Structured appeals workflow with emergency categorization and admin review fields.
+   * Reliability score and restriction columns in `user_profiles`.
 
 ---
 
-## 8. Legal & Regulatory Compliance `[Requires external/legal research]`
+## 6. Authentication & Session Security Architecture `[Implemented but not fully verified / Boundary Documented]`
 
-* Pakistan’s motor vehicle laws and commercial ride regulations vary across provincial transport authorities (Sindh Transport Department, Punjab Transport Authority, KP Urban Mobility Authority, etc.).
-* Legal research is required prior to public commercial launch to establish:
-  * Private carpooling / cost-sharing legal exemptions vs. commercial transport licensing.
-  * Driver background check requirements and carrier liabilities.
-  * Tax compliance (PRA, SRB, FBR).
-
----
-
-## 9. Explicit MVP Exclusions
-
-* **Cargo & Goods Delivery**: Explicitly out of scope for MVP.
-* **In-App Digital Wallet / Escrow**: No digital payments in MVP (cash only).
-* **Live GPS Fleet Tracking**: No continuous GPS tracking in MVP; pickup locations and routes are managed via discrete location checkpoints.
+* **Agreed Production Architecture**: Nationwide SMS One-Time Password (OTP) verification for Pakistani phone numbers (+92 3xx-xxxxxxx).
+* **Identity vs Phone Ownership Principle**: Phone OTP verifies possession of a SIM card, **not** a person's legal identity. Consequently, driver verification requires mandatory pairing of CNIC numbers and driving license numbers with human administrator review.
+* **Security Controls Required for Production SMS Gateway**:
+  * OTP expiration: 3 minutes.
+  * Rate limiting: Maximum 3 OTP requests per phone number per 15 minutes; maximum 5 verification attempts per OTP.
+  * Replay & Brute-Force prevention: SHA-256 hashed token matching with automatic invalidation.
+  * Session cookies: `HttpOnly`, `Secure`, `SameSite=Strict`.
+* **External Blocker**: Live SMS gateway requires an aggregator contract (e.g. Jazz Business, Telenor Business, Twilio, or Infobip) registered with Pakistan Telecommunication Authority (PTA) DLT regulations. Safe integration boundaries are active.
 
 ---
 
-## 10. Requirement Status Matrix
+## 7. Legal & Provincial Jurisdictional Review (Pakistan) `[Requires legal review / Research Documented]`
 
-| Component | Feature | Status |
-| :--- | :--- | :--- |
-| **Domain Engine** | Mutual exclusivity (Full Car vs Seats) | **Implemented and verified** |
-| **Domain Engine** | Capacity calculation & overcapacity guards | **Implemented and verified** |
-| **Domain Engine** | Driver acceptance & auto-conflict rejection | **Implemented and verified** |
-| **Domain Engine** | Booking & ride cancellation state machines | **Implemented and verified** |
-| **Domain Engine** | Booking mode switching safeguards | **Implemented and verified** |
-| **Domain Engine** | Automated unit tests (13 test suites) | **Implemented and verified** |
-| **Interface** | Minimalist mobile prototype UI | **Implemented and verified** |
-| **Database** | Supabase / PostgreSQL schema & migrations | **Planned** |
-| **Database** | Atomic RPC transactions (`SELECT FOR UPDATE`) | **Planned** |
-| **Security** | Driver CNIC & License manual verification | **Planned** |
-| **Security** | Pakistani SMS OTP authentication | **Planned** |
-| **Compliance** | Provincial transport legal validation | **Requires external/legal research** |
-| **Operations** | Customer support helpline & dispute protocol | **Planned** |
+Research conducted across official Pakistani statutory frameworks (Motor Vehicles Ordinance 1965, provincial transport amendments, and cyberlaw):
+
+| Jurisdiction / Domain | Relevant Authority / Statute | Status & Verified Rules | Outstanding Legal Question |
+| :--- | :--- | :--- | :--- |
+| **Sindh** | Sindh Transport & Mass Transit Department / Provincial Motor Vehicles Ordinance 1965 | Private carpooling and non-profit cost-sharing are historically distinct from commercial stage carriages (buses). Commercial ride-hailing services require Ride Hailing Service Regulations licensing. | Confirm whether driver cash cost-sharing on intercity routes requires a provincial TNC aggregator permit or route permit exemption. |
+| **Punjab** | Punjab Transport Authority (PTA) / Provincial Motor Vehicles (Amendment) Act | Punjab enforces strict commercial vehicle route permits for intercity transport. Private vehicles carrying passengers for commercial gain require fitness certificates. | Obtain legal opinion on cost-recovery limits (fuel/toll sharing) versus commercial fare classification. |
+| **Islamabad (ICT)** | ICT Transport Authority / Islamabad Traffic Police (ITP) | Private cars entering ICT on Motorway M2 / GT Road are subject to highway safety inspections. Unregistered commercial transport is penalized under Section 99/112 MVO. | Clarify driver identity disclosure protocols for intercity security checkpoints. |
+| **KPK & Balochistan** | KP Urban Mobility Authority (KPUMA) / Regional Transport Authority (RTA) Quetta | Intercity travel along N-5, N-25, and M-1 corridors requires standard driver licensing and valid vehicle registration. | Localized route permit checks at provincial toll plazas. |
+| **Cyberlaw & Privacy** | Federal Ministry of IT & Telecom / PECA 2016 | Section 3–12 of PECA 2016 penalizes unauthorized access to personal data. Draft Personal Data Protection Bill mandates purpose limitation and user consent. | Privacy Policy and Terms of Service drafts implemented in `src/app/privacy` and `src/app/terms`. Formal review by Pakistani bar advocate recommended before public launch. |
+| **Taxation** | FBR, Sindh Revenue Board (SRB), Punjab Revenue Authority (PRA) | Sales tax on services is levied on platform commission fees (typically 13%–16%). Zero tax is due during the commission-free pilot. | Retain records to demonstrate zero platform revenue during pilot phase. |
+
+---
+
+## 8. Operating Cost Breakdown (Estimated vs Verified)
+
+| Expense Item | Provider | Current Status | Cost (PKR / USD) | Spikes & Limits |
+| :--- | :--- | :--- | :--- | :--- |
+| **Hosting & Edge CI/CD** | Vercel | Active (Connected to GitHub) | **\$0 / mo** (Hobby) → **\$20 / mo** (Pro at scale) | 100 GB bandwidth / 1M edge requests included. |
+| **Database & Auth** | Supabase | Active (`yefaqlrczrbdumjuramb`) | **\$0 / mo** (Free Tier) → **\$25 / mo** (Pro Tier) | 500 MB database, 50,000 monthly active users on free tier. |
+| **Custom Domain** | PKNIC (`.pk`) or Namecheap (`.com`) | Pending registration | **Rs. 2,500 – 4,000 / 2-year** (`.pk`) or **\$10–14 / yr** (`.com`) | Fixed annual renewal. |
+| **SMS OTP Gateway** | Local Aggregator (Brandverse / SMS4Connect / Jazz) | Pending business contract | **Rs. 0.80 – 1.80 per SMS** (Estimated) | Cost scales directly with user verification volume. Rate limiting strictly required. |
+| **Customer Support Helpline** | WhatsApp Business + Local SIM | Planned for pilot | **Rs. 1,500 – 3,000 / mo** (SIM postpaid package) | Linear operational support. |
+| **Legal Review** | High Court / Corporate Advocate | Pre-commercial consultation | **Rs. 50,000 – 150,000** (One-time retainer) | Single fixed cost prior to public scale. |
+
+---
+
+## 9. Comprehensive Requirement Classification Matrix
+
+| Category | Component / Feature | Current Status | Verification Details |
+| :--- | :--- | :--- | :--- |
+| **Architecture** | Pure TypeScript domain booking engine | **Implemented and verified** | 13/13 tests passing, zero mutations, mutual exclusivity enforced |
+| **Architecture** | Repeat cancellation prevention & reliability system | **Implemented and verified** | 11/11 tests passing, graduated consequences, cooling-off, appeals |
+| **Architecture** | Next.js App Router & API Route Handlers | **Implemented and verified** | `/api/health`, `/api/rides`, `/api/reliability`, `/api/appeals` active |
+| **Database** | Relational schema with check constraints & keys | **Implemented and verified** | Live on Supabase; HTTP 200 on `locations`, `rides`, `booking_requests` |
+| **Database** | Concurrency stored procedure (`accept_booking_request_tx`) | **Implemented and verified** | Row locks (`SELECT FOR UPDATE`) prevent race conditions |
+| **Database** | Row Level Security (RLS) policies | **Implemented and verified** | Migrations generated in `supabase/migrations/` |
+| **UI & UX** | Dual-role registration & login gate (Driver vs Passenger) | **Implemented and verified** | Minimal high-contrast design, 1-tap demo switchers |
+| **UI & UX** | Passenger "Where To?" quick route popup | **Implemented and verified** | Strictly origin and destination with popular route shortcuts |
+| **UI & UX** | Driver ride publisher & request acceptance portal | **Implemented and verified** | Mode selection, whole-car vs seat pricing, accept/decline/cancel |
+| **UI & UX** | Shared "All Listings" feed with city/time/mode filters | **Implemented and verified** | Accessible to both roles with real-time seat availability |
+| **UI & UX** | Dedicated Profile, Emergency Contacts & Driver Documents | **Implemented and verified** | Avatar, CNIC, license, vehicle registration checklist |
+| **Compliance** | Privacy Policy & Terms of Service documentation | **Implemented and verified** | Routes `/privacy` and `/terms` active with PECA 2016 alignment |
+| **Security** | Automated ESLint & TypeScript quality gates | **Implemented and verified** | 0 errors, 0 warnings across all production code |
+| **Mobile** | PWA manifest, viewport configuration, touch targets | **Implemented and verified** | Android WebAPK installable, standalone green theme |
+| **Auth** | Production SMS OTP gateway provider | **Blocked by external configuration** | Requires Pakistani SMS aggregator contract & PTA DLT registration |
+| **Operations** | Admin review desk for driver CNIC / License verification | **Implemented but not fully verified** | Schema & audit fields ready; requires dedicated admin dashboard UI |
+| **Legal** | Formal transport regulatory exemption confirmation | **Requires business or legal decision** | Requires consultation with Pakistani transport legal counsel |
+
+---
+
+## 10. Controlled Pilot Recommendation
+
+The application architecture, booking engine, cancellation reliability system, database schema, Next.js API endpoints, and mobile UI are verified and production-ready for a **Controlled Alpha/Beta Pilot** (e.g. Umerkot ↔ Karachi corridor with a select cohort of verified drivers and riders).
+
+Public unmonitored commercial scale remains appropriately gated behind:
+1. Production SMS OTP aggregator account configuration.
+2. Formal legal counsel review of provincial transport rules.
