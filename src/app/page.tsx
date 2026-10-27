@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   acceptBookingRequest,
   rejectBookingRequest,
@@ -38,36 +38,96 @@ const NATIONWIDE_CITIES: City[] = [
   { id: 'loc-qta', name: 'Quetta', province: 'Balochistan' },
 ];
 
-const INITIAL_RIDE: Ride = {
-  id: 'ride-101',
-  driverId: 'driver-tariq',
-  vehicleId: 'veh-corolla',
-  originLocationId: 'loc-uk',
-  destinationLocationId: 'loc-khi',
-  departureTime: '2026-11-02T07:00:00Z',
-  bookingMode: 'WHOLE_CAR_OR_SEATS',
-  capacity: 4,
-  bookedSeatsCount: 0,
-  wholeCarPrice: 14000,
-  seatPrice: 3500,
-  status: 'PUBLISHED',
-  autoReopenOnCancellation: true,
-  notes: 'Air-conditioned Toyota Corolla. Trunk space for luggage. Non-smoking ride.',
-  createdAt: '2026-10-26T10:00:00Z',
-  updatedAt: '2026-10-26T10:00:00Z',
-};
+const INITIAL_RIDES: Ride[] = [
+  {
+    id: 'ride-101',
+    driverId: 'driver-tariq',
+    vehicleId: 'veh-corolla',
+    originLocationId: 'loc-uk',
+    destinationLocationId: 'loc-khi',
+    departureTime: '2026-11-02T07:00:00Z',
+    bookingMode: 'WHOLE_CAR_OR_SEATS',
+    capacity: 4,
+    bookedSeatsCount: 0,
+    wholeCarPrice: 14000,
+    seatPrice: 3500,
+    status: 'PUBLISHED',
+    autoReopenOnCancellation: true,
+    notes: 'Air-conditioned Toyota Corolla. Trunk space for luggage. Non-smoking ride.',
+    createdAt: '2026-10-26T10:00:00Z',
+    updatedAt: '2026-10-26T10:00:00Z',
+  },
+  {
+    id: 'ride-102',
+    driverId: 'driver-aslam',
+    vehicleId: 'veh-city',
+    originLocationId: 'loc-khi',
+    destinationLocationId: 'loc-hyd',
+    departureTime: '2026-11-02T09:30:00Z',
+    bookingMode: 'WHOLE_CAR_OR_SEATS',
+    capacity: 4,
+    bookedSeatsCount: 0,
+    wholeCarPrice: 6000,
+    seatPrice: 1500,
+    status: 'PUBLISHED',
+    autoReopenOnCancellation: true,
+    notes: 'Honda City with AC. Clean interior. Departure from Toll Plaza.',
+    createdAt: '2026-10-26T11:00:00Z',
+    updatedAt: '2026-10-26T11:00:00Z',
+  },
+  {
+    id: 'ride-103',
+    driverId: 'driver-kamran',
+    vehicleId: 'veh-yaris',
+    originLocationId: 'loc-lhr',
+    destinationLocationId: 'loc-isb',
+    departureTime: '2026-11-02T08:00:00Z',
+    bookingMode: 'WHOLE_CAR_OR_SEATS',
+    capacity: 4,
+    bookedSeatsCount: 0,
+    wholeCarPrice: 16000,
+    seatPrice: 4000,
+    status: 'PUBLISHED',
+    autoReopenOnCancellation: true,
+    notes: 'Motorway M2 direct travel. Toyota Yaris with chilled AC.',
+    createdAt: '2026-10-26T12:00:00Z',
+    updatedAt: '2026-10-26T12:00:00Z',
+  },
+  {
+    id: 'ride-104',
+    driverId: 'driver-farhan',
+    vehicleId: 'veh-cultus',
+    originLocationId: 'loc-pes',
+    destinationLocationId: 'loc-isb',
+    departureTime: '2026-11-02T10:00:00Z',
+    bookingMode: 'SEATS',
+    capacity: 3,
+    bookedSeatsCount: 0,
+    wholeCarPrice: 7500,
+    seatPrice: 2500,
+    status: 'PUBLISHED',
+    autoReopenOnCancellation: true,
+    notes: 'Motorway M1 journey. Quick travel, spacious seating.',
+    createdAt: '2026-10-26T13:00:00Z',
+    updatedAt: '2026-10-26T13:00:00Z',
+  },
+];
 
 export default function Home() {
   // Navigation: passenger vs driver mode
   const [activeTab, setActiveTab] = useState<'passenger' | 'driver'>('passenger');
 
-  // Active Ride and Booking State
-  const [ride, setRide] = useState<Ride>(INITIAL_RIDE);
+  // Rides & Bookings State
+  const [rides, setRides] = useState<Ride[]>(INITIAL_RIDES);
+  const [selectedRideId, setSelectedRideId] = useState<string>('ride-101');
   const [bookings, setBookings] = useState<BookingRequest[]>([]);
+  const [isClientLoaded, setIsClientLoaded] = useState(false);
 
-  // Passenger search & booking form state
-  const [originId, setOriginId] = useState('loc-uk');
-  const [destId, setDestId] = useState('loc-khi');
+  // Search & Filter State
+  const [originId, setOriginId] = useState<string>('loc-uk');
+  const [destId, setDestId] = useState<string>('loc-khi');
+
+  // Passenger booking form
   const [passengerName, setPassengerName] = useState('Muhammad Ali');
   const [passengerPhone, setPassengerPhone] = useState('0301-2345678');
   const [bookingType, setBookingType] = useState<BookingType>('WHOLE_CAR');
@@ -87,42 +147,79 @@ export default function Home() {
     description: string;
   } | null>({
     type: 'info',
-    title: 'Easy Pakistan Intercity Ride Sharing',
-    description: 'Book full car or single seats with cash payment. Switch between Passenger and Driver views to test.',
+    title: 'ReturnRide Pakistan (Mobile-First Prototype)',
+    description: 'Book full car or single seats with cash on boarding. Switch between Passenger and Driver views to test.',
   });
 
-  const availableSeats = calculateAvailableSeats(ride, bookings);
-  const originCity = NATIONWIDE_CITIES.find((c) => c.id === ride.originLocationId)?.name || 'Origin';
-  const destCity = NATIONWIDE_CITIES.find((c) => c.id === ride.destinationLocationId)?.name || 'Destination';
+  // Load from localStorage on client mount
+  useEffect(() => {
+    try {
+      const savedRides = localStorage.getItem('returnride_rides');
+      const savedBookings = localStorage.getItem('returnride_bookings');
+      if (savedRides) {
+        setRides(JSON.parse(savedRides));
+      }
+      if (savedBookings) {
+        setBookings(JSON.parse(savedBookings));
+      }
+    } catch {
+      // Ignore localStorage read failures
+    }
+    setIsClientLoaded(true);
+  }, []);
 
-  // Total price for passenger request
+  // Save to localStorage when state changes
+  useEffect(() => {
+    if (!isClientLoaded) return;
+    try {
+      localStorage.setItem('returnride_rides', JSON.stringify(rides));
+      localStorage.setItem('returnride_bookings', JSON.stringify(bookings));
+    } catch {
+      // Ignore localStorage write failures
+    }
+  }, [rides, bookings, isClientLoaded]);
+
+  // Current active ride
+  const currentRide = rides.find((r) => r.id === selectedRideId) || rides[0];
+  const rideBookings = bookings.filter((b) => b.rideId === currentRide.id);
+  const availableSeats = calculateAvailableSeats(currentRide, rideBookings);
+
+  // Matching rides for the selected search route
+  const matchingRides = rides.filter(
+    (r) => r.originLocationId === originId && r.destinationLocationId === destId
+  );
+
+  const originCity = NATIONWIDE_CITIES.find((c) => c.id === originId)?.name || 'Origin';
+  const destCity = NATIONWIDE_CITIES.find((c) => c.id === destId)?.name || 'Destination';
+
+  // Calculate price
   const currentPrice =
     bookingType === 'WHOLE_CAR'
-      ? ride.wholeCarPrice
-      : (ride.seatPrice || 0) * seatsRequested;
+      ? currentRide.wholeCarPrice
+      : (currentRide.seatPrice || 0) * seatsRequested;
 
   // Passenger creates a request
   const handleCreateRequest = (e: React.FormEvent) => {
     e.preventDefault();
     try {
       const seatsToBook = bookingType === 'WHOLE_CAR' ? 1 : seatsRequested;
-      const price = bookingType === 'WHOLE_CAR' ? ride.wholeCarPrice : (ride.seatPrice || 0) * seatsToBook;
+      const price = bookingType === 'WHOLE_CAR' ? currentRide.wholeCarPrice : (currentRide.seatPrice || 0) * seatsToBook;
 
       const newRequest = createBookingRequest({
         id: `req-${Date.now().toString().slice(-4)}`,
-        ride,
+        ride: currentRide,
         passengerId: `${passengerName} (${passengerPhone})`,
         bookingType,
         requestedSeats: seatsToBook,
         totalPrice: price,
-        confirmedBookings: bookings,
+        confirmedBookings: rideBookings,
       });
 
       setBookings((prev) => [newRequest, ...prev]);
       setBanner({
         type: 'success',
         title: 'Request Sent to Driver!',
-        description: `Your request for ${bookingType === 'WHOLE_CAR' ? 'the Full Car' : `${seatsToBook} seat(s)`} has been sent. Driver Tariq will accept it shortly.`,
+        description: `Your request for ${bookingType === 'WHOLE_CAR' ? 'the Full Car' : `${seatsToBook} seat(s)`} has been sent. Driver will review and accept it.`,
       });
     } catch (err: unknown) {
       if (err instanceof BookingEngineError) {
@@ -136,16 +233,23 @@ export default function Home() {
   // Driver accepts a booking request
   const handleAcceptRequest = (request: BookingRequest) => {
     try {
-      const otherPending = bookings.filter((b) => b.id !== request.id && b.status === 'PENDING');
+      const targetRide = rides.find((r) => r.id === request.rideId);
+      if (!targetRide) return;
+
+      const currentRideBookings = bookings.filter((b) => b.rideId === targetRide.id);
+      const otherPending = currentRideBookings.filter((b) => b.id !== request.id && b.status === 'PENDING');
+
       const result = acceptBookingRequest({
-        ride,
+        ride: targetRide,
         requestToAccept: request,
         otherPendingRequests: otherPending,
-        confirmedBookings: bookings,
+        confirmedBookings: currentRideBookings,
       });
 
-      setRide(result.updatedRide);
+      // Update ride in rides array
+      setRides((prev) => prev.map((r) => (r.id === result.updatedRide.id ? result.updatedRide : r)));
 
+      // Update bookings
       setBookings((prev) =>
         prev.map((b) => {
           if (b.id === result.acceptedRequest.id) return result.acceptedRequest;
@@ -173,7 +277,7 @@ export default function Home() {
   // Driver rejects a booking request
   const handleRejectRequest = (request: BookingRequest) => {
     try {
-      const rejected = rejectBookingRequest(request, 'Driver is unavailable or fully booked.');
+      const rejected = rejectBookingRequest(request, 'Driver is unavailable or seats filled.');
       setBookings((prev) => prev.map((b) => (b.id === request.id ? rejected : b)));
       setBanner({
         type: 'info',
@@ -190,19 +294,22 @@ export default function Home() {
   // Driver or passenger cancels a confirmed booking
   const handleCancelBooking = (booking: BookingRequest) => {
     try {
+      const targetRide = rides.find((r) => r.id === booking.rideId);
+      if (!targetRide) return;
+
       const result = cancelConfirmedBooking({
-        ride,
+        ride: targetRide,
         booking,
         cancelledBy: 'DRIVER',
-        reason: 'Passenger requested cancellation',
+        reason: 'Passenger requested cancellation over phone call',
       });
 
-      setRide(result.updatedRide);
+      setRides((prev) => prev.map((r) => (r.id === result.updatedRide.id ? result.updatedRide : r)));
       setBookings((prev) => prev.map((b) => (b.id === booking.id ? result.updatedBooking : b)));
       setBanner({
         type: 'info',
         title: 'Booking Cancelled',
-        description: 'The booking was cancelled and its seats are now open again.',
+        description: 'The booking was cancelled and its seats have been safely released.',
       });
     } catch (err: unknown) {
       if (err instanceof BookingEngineError) {
@@ -212,20 +319,21 @@ export default function Home() {
   };
 
   // Driver cancels entire ride
-  const handleCancelRide = () => {
+  const handleCancelRide = (rideToCancel: Ride) => {
     if (!confirm('Are you sure you want to cancel this entire ride? All passengers will be notified.')) {
       return;
     }
     try {
+      const rideBookingsList = bookings.filter((b) => b.rideId === rideToCancel.id);
       const result = cancelRide({
-        ride,
-        driverId: ride.driverId,
+        ride: rideToCancel,
+        driverId: rideToCancel.driverId,
         reason: 'Emergency or mechanical vehicle issue',
-        confirmedBookings: bookings,
-        pendingRequests: bookings,
+        confirmedBookings: rideBookingsList,
+        pendingRequests: rideBookingsList,
       });
 
-      setRide(result.updatedRide);
+      setRides((prev) => prev.map((r) => (r.id === result.updatedRide.id ? result.updatedRide : r)));
       setBookings((prev) =>
         prev.map((b) => {
           const cancelled = result.cancelledBookings.find((c) => c.id === b.id);
@@ -239,7 +347,7 @@ export default function Home() {
       setBanner({
         type: 'error',
         title: 'Ride Cancelled',
-        description: 'The ride was cancelled. All confirmed bookings and requests have been closed.',
+        description: 'The ride was cancelled. All confirmed bookings and requests have been safely closed.',
       });
     } catch (err: unknown) {
       if (err instanceof BookingEngineError) {
@@ -252,13 +360,13 @@ export default function Home() {
   const handleModeSwitch = (newMode: RideBookingMode) => {
     try {
       const result = switchRideBookingMode({
-        ride,
+        ride: currentRide,
         newMode,
-        confirmedBookings: bookings,
-        pendingRequests: bookings,
+        confirmedBookings: rideBookings,
+        pendingRequests: rideBookings,
       });
 
-      setRide(result.updatedRide);
+      setRides((prev) => prev.map((r) => (r.id === result.updatedRide.id ? result.updatedRide : r)));
       setBookings((prev) =>
         prev.map((b) => {
           const autoRej = result.autoRejectedRequests.find((r) => r.id === b.id);
@@ -284,21 +392,30 @@ export default function Home() {
     }
   };
 
-  // Reset to initial demo state
+  // Reset demo state
   const handleReset = () => {
-    setRide(INITIAL_RIDE);
+    try {
+      localStorage.removeItem('returnride_rides');
+      localStorage.removeItem('returnride_bookings');
+    } catch {
+      // Ignore
+    }
+    setRides(INITIAL_RIDES);
+    setSelectedRideId('ride-101');
     setBookings([]);
+    setOriginId('loc-uk');
+    setDestId('loc-khi');
     setBanner({
       type: 'info',
       title: 'Demo Reset',
-      description: 'Reset to initial Umerkot to Karachi ride.',
+      description: 'Reset demo data back to nationwide defaults.',
     });
   };
 
   // Driver publishes a new custom ride route
   const handlePublishNewRide = (e: React.FormEvent) => {
     e.preventDefault();
-    setRide({
+    const newRide: Ride = {
       id: `ride-${Date.now().toString().slice(-4)}`,
       driverId: 'driver-tariq',
       vehicleId: 'veh-corolla',
@@ -312,16 +429,20 @@ export default function Home() {
       seatPrice: Number(newPostSeatPrice),
       status: 'PUBLISHED',
       autoReopenOnCancellation: true,
-      notes: 'Clean car with AC. Trunk space available.',
+      notes: 'Clean car with AC. Trunk space available for standard luggage.',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-    });
-    setBookings([]);
+    };
+
+    setRides((prev) => [newRide, ...prev]);
+    setSelectedRideId(newRide.id);
+    setOriginId(newPostOrigin);
+    setDestId(newPostDest);
     setShowDriverPostModal(false);
     setBanner({
       type: 'success',
-      title: 'New Ride Published!',
-      description: `Now accepting bookings from ${
+      title: 'New Journey Published!',
+      description: `Ride created from ${
         NATIONWIDE_CITIES.find((c) => c.id === newPostOrigin)?.name
       } to ${NATIONWIDE_CITIES.find((c) => c.id === newPostDest)?.name}.`,
     });
@@ -330,7 +451,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 font-sans antialiased pb-20">
       {/* ========================================================================= */}
-      {/* HEADER: SIMPLE & HIGH CONTRAST */}
+      {/* TOP HEADER */}
       {/* ========================================================================= */}
       <header className="bg-emerald-800 text-white shadow-md sticky top-0 z-30">
         <div className="max-w-xl mx-auto px-4 py-3 flex items-center justify-between">
@@ -338,7 +459,7 @@ export default function Home() {
             <span className="text-2xl" role="img" aria-label="car">🚗</span>
             <div>
               <h1 className="text-xl font-black tracking-tight leading-none">ReturnRide</h1>
-              <p className="text-[11px] text-emerald-200 font-medium">Intercity Rides across Pakistan</p>
+              <p className="text-[11px] text-emerald-200 font-medium">Pakistan Intercity Ride Marketplace</p>
             </div>
           </div>
 
@@ -350,7 +471,7 @@ export default function Home() {
           </button>
         </div>
 
-        {/* Big Touch-Friendly Mode Tabs */}
+        {/* Big Touch Tabs */}
         <div className="max-w-xl mx-auto px-4 grid grid-cols-2 gap-2 pb-2">
           <button
             onClick={() => setActiveTab('passenger')}
@@ -379,7 +500,7 @@ export default function Home() {
       </header>
 
       {/* ========================================================================= */}
-      {/* MAIN CONTAINER */}
+      {/* MAIN CONTENT AREA */}
       {/* ========================================================================= */}
       <main className="max-w-xl mx-auto px-4 pt-4 space-y-4">
         {/* Simple Notification Alert */}
@@ -413,18 +534,18 @@ export default function Home() {
         )}
 
         {/* ========================================================================= */}
-        {/* PASSENGER VIEW: SIMPLE 3 STEPS */}
+        {/* PASSENGER VIEW */}
         {/* ========================================================================= */}
         {activeTab === 'passenger' && (
           <div className="space-y-4">
-            {/* Quick Route Selector */}
+            {/* Step 1: Route Search */}
             <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                  Step 1: Your Route
+                  Step 1: Where do you want to travel?
                 </span>
                 <span className="text-xs bg-slate-100 text-slate-700 px-2 py-0.5 rounded-full font-semibold">
-                  Pakistan Nationwide
+                  Nationwide Routes
                 </span>
               </div>
 
@@ -441,282 +562,373 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Quick Route Switcher Dropdowns */}
+              {/* Route Dropdowns */}
               <div className="grid grid-cols-2 gap-2 mt-3">
                 <div>
-                  <label className="block text-[11px] text-slate-500 font-semibold mb-1">Change Origin</label>
+                  <label className="block text-[11px] text-slate-500 font-semibold mb-1">Departure City</label>
                   <select
                     value={originId}
                     onChange={(e) => {
                       setOriginId(e.target.value);
-                      setRide((r) => ({ ...r, originLocationId: e.target.value }));
+                      const match = rides.find(
+                        (r) => r.originLocationId === e.target.value && r.destinationLocationId === destId
+                      );
+                      if (match) setSelectedRideId(match.id);
                     }}
                     className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
                     {NATIONWIDE_CITIES.map((c) => (
                       <option key={c.id} value={c.id}>
-                        {c.name}
+                        {c.name} ({c.province})
                       </option>
                     ))}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-[11px] text-slate-500 font-semibold mb-1">Change Destination</label>
+                  <label className="block text-[11px] text-slate-500 font-semibold mb-1">Arrival City</label>
                   <select
                     value={destId}
                     onChange={(e) => {
                       setDestId(e.target.value);
-                      setRide((r) => ({ ...r, destinationLocationId: e.target.value }));
+                      const match = rides.find(
+                        (r) => r.originLocationId === originId && r.destinationLocationId === e.target.value
+                      );
+                      if (match) setSelectedRideId(match.id);
                     }}
                     className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
                     {NATIONWIDE_CITIES.map((c) => (
                       <option key={c.id} value={c.id}>
-                        {c.name}
+                        {c.name} ({c.province})
                       </option>
                     ))}
                   </select>
                 </div>
               </div>
+
+              {/* Quick Popular Route Chips */}
+              <div className="mt-3 pt-2.5 border-t border-slate-100">
+                <span className="block text-[10px] text-slate-400 font-bold uppercase mb-1.5">
+                  Popular Routes (Tap to switch):
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    onClick={() => {
+                      setOriginId('loc-uk');
+                      setDestId('loc-khi');
+                      setSelectedRideId('ride-101');
+                    }}
+                    className="text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-800 px-2.5 py-1 rounded-lg font-medium transition"
+                  >
+                    Umerkot ➔ Karachi
+                  </button>
+                  <button
+                    onClick={() => {
+                      setOriginId('loc-khi');
+                      setDestId('loc-hyd');
+                      setSelectedRideId('ride-102');
+                    }}
+                    className="text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-800 px-2.5 py-1 rounded-lg font-medium transition"
+                  >
+                    Karachi ➔ Hyderabad
+                  </button>
+                  <button
+                    onClick={() => {
+                      setOriginId('loc-lhr');
+                      setDestId('loc-isb');
+                      setSelectedRideId('ride-103');
+                    }}
+                    className="text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-800 px-2.5 py-1 rounded-lg font-medium transition"
+                  >
+                    Lahore ➔ Islamabad
+                  </button>
+                  <button
+                    onClick={() => {
+                      setOriginId('loc-pes');
+                      setDestId('loc-isb');
+                      setSelectedRideId('ride-104');
+                    }}
+                    className="text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-800 px-2.5 py-1 rounded-lg font-medium transition"
+                  >
+                    Peshawar ➔ Islamabad
+                  </button>
+                </div>
+              </div>
             </div>
 
-            {/* Ride Card */}
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-              {/* Driver & Ride Header */}
-              <div className="p-4 bg-gradient-to-r from-slate-50 to-white border-b border-slate-100 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-full bg-emerald-100 border border-emerald-300 flex items-center justify-center text-xl font-bold text-emerald-800">
-                    👨‍✈️
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-extrabold text-slate-900 text-base">Tariq Khan</span>
-                      <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-bold">
-                        VERIFIED
-                      </span>
+            {/* Ride Card (Matching or Active) */}
+            {matchingRides.length > 0 ? (
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                {/* Driver & Ride Header */}
+                <div className="p-4 bg-gradient-to-r from-slate-50 to-white border-b border-slate-100 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-full bg-emerald-100 border border-emerald-300 flex items-center justify-center text-xl font-bold text-emerald-800">
+                      👨‍✈️
                     </div>
-                    <p className="text-xs text-slate-500 font-medium">Toyota Corolla (AC) • 07:00 AM Departure</p>
-                  </div>
-                </div>
-
-                {/* Ride Status Badge */}
-                <div>
-                  {ride.status === 'PUBLISHED' && (
-                    <span className="text-xs font-extrabold px-3 py-1.5 rounded-full bg-emerald-100 text-emerald-800 flex items-center gap-1">
-                      <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse"></span>
-                      Available
-                    </span>
-                  )}
-                  {ride.status === 'FULL_CAR_BOOKED' && (
-                    <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-purple-100 text-purple-800">
-                      Full Car Booked
-                    </span>
-                  )}
-                  {ride.status === 'SEATS_FILLED' && (
-                    <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-amber-100 text-amber-800">
-                      All Seats Filled
-                    </span>
-                  )}
-                  {ride.status === 'CANCELLED' && (
-                    <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-rose-100 text-rose-800">
-                      Ride Cancelled
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Capacity Banner */}
-              <div className="px-4 py-2.5 bg-slate-50 flex items-center justify-between border-b border-slate-100 text-xs">
-                <span className="text-slate-600 font-medium">Seats Remaining:</span>
-                <span
-                  className={`font-black text-sm ${
-                    availableSeats > 0 ? 'text-emerald-700' : 'text-rose-600'
-                  }`}
-                >
-                  {availableSeats} of {ride.capacity} seats free
-                </span>
-              </div>
-
-              {/* Booking Form (If ride is active) */}
-              {ride.status === 'PUBLISHED' ? (
-                <form onSubmit={handleCreateRequest} className="p-4 space-y-4">
-                  <div>
-                    <span className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
-                      Step 2: Choose Booking Mode
-                    </span>
-
-                    {/* Booking Option Cards */}
-                    <div className="grid grid-cols-1 gap-2.5">
-                      {/* Entire Car Option */}
-                      <label
-                        className={`p-3.5 rounded-2xl border-2 cursor-pointer transition flex items-center justify-between ${
-                          bookingType === 'WHOLE_CAR'
-                            ? 'border-emerald-600 bg-emerald-50/70 shadow-sm'
-                            : 'border-slate-200 hover:border-slate-300 bg-white'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <input
-                            type="radio"
-                            name="bookingType"
-                            value="WHOLE_CAR"
-                            checked={bookingType === 'WHOLE_CAR'}
-                            onChange={() => setBookingType('WHOLE_CAR')}
-                            className="w-5 h-5 accent-emerald-600"
-                          />
-                          <div>
-                            <div className="font-extrabold text-slate-900 text-sm flex items-center gap-1.5">
-                              <span>🚗</span>
-                              <span>Entire Car (Full Car)</span>
-                            </div>
-                            <p className="text-[11px] text-slate-500 mt-0.5">
-                              Private car for you & family. No other passengers.
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="text-right">
-                          <span className="block text-sm font-black text-emerald-800">
-                            Rs. {ride.wholeCarPrice.toLocaleString()}
-                          </span>
-                          <span className="text-[10px] text-slate-500 font-semibold">Total Price</span>
-                        </div>
-                      </label>
-
-                      {/* Single Seats Option */}
-                      <label
-                        className={`p-3.5 rounded-2xl border-2 cursor-pointer transition flex items-center justify-between ${
-                          bookingType === 'SEAT'
-                            ? 'border-emerald-600 bg-emerald-50/70 shadow-sm'
-                            : 'border-slate-200 hover:border-slate-300 bg-white'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <input
-                            type="radio"
-                            name="bookingType"
-                            value="SEAT"
-                            checked={bookingType === 'SEAT'}
-                            onChange={() => setBookingType('SEAT')}
-                            className="w-5 h-5 accent-emerald-600"
-                          />
-                          <div>
-                            <div className="font-extrabold text-slate-900 text-sm flex items-center gap-1.5">
-                              <span>💺</span>
-                              <span>Single Seat(s)</span>
-                            </div>
-                            <p className="text-[11px] text-slate-500 mt-0.5">
-                              Share journey with others. Pay per seat.
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="text-right">
-                          <span className="block text-sm font-black text-emerald-800">
-                            Rs. {ride.seatPrice?.toLocaleString()}
-                          </span>
-                          <span className="text-[10px] text-slate-500 font-semibold">Per Seat</span>
-                        </div>
-                      </label>
-                    </div>
-
-                    {/* Stepper for Seat count if 'SEAT' selected */}
-                    {bookingType === 'SEAT' && (
-                      <div className="mt-3 p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between">
-                        <span className="text-xs font-bold text-slate-700">How many seats do you need?</span>
-                        <div className="flex items-center gap-3">
-                          <button
-                            type="button"
-                            onClick={() => setSeatsRequested((s) => Math.max(1, s - 1))}
-                            className="w-9 h-9 rounded-xl bg-white border border-slate-300 font-black text-lg text-slate-700 hover:bg-slate-100 flex items-center justify-center shadow-xs"
-                          >
-                            -
-                          </button>
-                          <span className="font-black text-lg w-5 text-center text-slate-900">
-                            {seatsRequested}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => setSeatsRequested((s) => Math.min(availableSeats, s + 1))}
-                            className="w-9 h-9 rounded-xl bg-white border border-slate-300 font-black text-lg text-slate-700 hover:bg-slate-100 flex items-center justify-center shadow-xs"
-                          >
-                            +
-                          </button>
-                        </div>
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-extrabold text-slate-900 text-base">
+                          {currentRide.driverId === 'driver-tariq'
+                            ? 'Tariq Khan'
+                            : currentRide.driverId === 'driver-aslam'
+                            ? 'Aslam Memon'
+                            : currentRide.driverId === 'driver-kamran'
+                            ? 'Kamran Butt'
+                            : 'Farhan Shinwari'}
+                        </span>
+                        <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-bold">
+                          VERIFIED
+                        </span>
                       </div>
+                      <p className="text-xs text-slate-500 font-medium">{currentRide.notes}</p>
+                    </div>
+                  </div>
+
+                  {/* Status Badge */}
+                  <div>
+                    {currentRide.status === 'PUBLISHED' && (
+                      <span className="text-xs font-extrabold px-3 py-1.5 rounded-full bg-emerald-100 text-emerald-800 flex items-center gap-1">
+                        <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse"></span>
+                        Available
+                      </span>
+                    )}
+                    {currentRide.status === 'FULL_CAR_BOOKED' && (
+                      <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-purple-100 text-purple-800">
+                        Full Car Booked
+                      </span>
+                    )}
+                    {currentRide.status === 'SEATS_FILLED' && (
+                      <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-amber-100 text-amber-800">
+                        All Seats Filled
+                      </span>
+                    )}
+                    {currentRide.status === 'CANCELLED' && (
+                      <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-rose-100 text-rose-800">
+                        Ride Cancelled
+                      </span>
                     )}
                   </div>
+                </div>
 
-                  {/* Step 3: Passenger Details */}
-                  <div className="border-t border-slate-100 pt-3 space-y-3">
-                    <span className="block text-xs font-bold uppercase tracking-wider text-slate-500">
-                      Step 3: Your Contact Details
-                    </span>
+                {/* Capacity Banner */}
+                <div className="px-4 py-2.5 bg-slate-50 flex items-center justify-between border-b border-slate-100 text-xs">
+                  <span className="text-slate-600 font-medium">Available Capacity:</span>
+                  <span
+                    className={`font-black text-sm ${
+                      availableSeats > 0 ? 'text-emerald-700' : 'text-rose-600'
+                    }`}
+                  >
+                    {availableSeats} of {currentRide.capacity} seats remaining
+                  </span>
+                </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <div>
-                        <label className="block text-[11px] font-bold text-slate-600 mb-1">Your Full Name</label>
-                        <input
-                          type="text"
-                          value={passengerName}
-                          onChange={(e) => setPassengerName(e.target.value)}
-                          placeholder="e.g. Ali Khan"
-                          required
-                          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                        />
+                {/* Step 2: Choose Booking Mode */}
+                {currentRide.status === 'PUBLISHED' ? (
+                  <form onSubmit={handleCreateRequest} className="p-4 space-y-4">
+                    <div>
+                      <span className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+                        Step 2: Choose How You Want To Ride
+                      </span>
+
+                      {/* Booking Cards */}
+                      <div className="grid grid-cols-1 gap-2.5">
+                        {/* Whole Car Option */}
+                        {currentRide.bookingMode !== 'SEATS' && (
+                          <label
+                            className={`p-3.5 rounded-2xl border-2 cursor-pointer transition flex items-center justify-between ${
+                              bookingType === 'WHOLE_CAR'
+                                ? 'border-emerald-600 bg-emerald-50/70 shadow-sm'
+                                : 'border-slate-200 hover:border-slate-300 bg-white'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <input
+                                type="radio"
+                                name="bookingType"
+                                value="WHOLE_CAR"
+                                checked={bookingType === 'WHOLE_CAR'}
+                                onChange={() => setBookingType('WHOLE_CAR')}
+                                className="w-5 h-5 accent-emerald-600"
+                              />
+                              <div>
+                                <div className="font-extrabold text-slate-900 text-sm flex items-center gap-1.5">
+                                  <span>🚗</span>
+                                  <span>Entire Car (Poori Gaari)</span>
+                                </div>
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                  Private car for you & family. No stranger passengers.
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="text-right">
+                              <span className="block text-sm font-black text-emerald-800">
+                                Rs. {currentRide.wholeCarPrice.toLocaleString()}
+                              </span>
+                              <span className="text-[10px] text-slate-500 font-semibold">Total Price</span>
+                            </div>
+                          </label>
+                        )}
+
+                        {/* Individual Seats Option */}
+                        {currentRide.bookingMode !== 'WHOLE_CAR' && (
+                          <label
+                            className={`p-3.5 rounded-2xl border-2 cursor-pointer transition flex items-center justify-between ${
+                              bookingType === 'SEAT'
+                                ? 'border-emerald-600 bg-emerald-50/70 shadow-sm'
+                                : 'border-slate-200 hover:border-slate-300 bg-white'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <input
+                                type="radio"
+                                name="bookingType"
+                                value="SEAT"
+                                checked={bookingType === 'SEAT'}
+                                onChange={() => setBookingType('SEAT')}
+                                className="w-5 h-5 accent-emerald-600"
+                              />
+                              <div>
+                                <div className="font-extrabold text-slate-900 text-sm flex items-center gap-1.5">
+                                  <span>💺</span>
+                                  <span>Single Seat(s) (Ek Ek Seat)</span>
+                                </div>
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                  Share journey with others. Pay only per seat.
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="text-right">
+                              <span className="block text-sm font-black text-emerald-800">
+                                Rs. {currentRide.seatPrice?.toLocaleString()}
+                              </span>
+                              <span className="text-[10px] text-slate-500 font-semibold">Per Seat</span>
+                            </div>
+                          </label>
+                        )}
                       </div>
-                      <div>
-                        <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                          Mobile Number (for Driver Call)
-                        </label>
-                        <input
-                          type="tel"
-                          value={passengerPhone}
-                          onChange={(e) => setPassengerPhone(e.target.value)}
-                          placeholder="0300-1234567"
-                          required
-                          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                        />
-                      </div>
+
+                      {/* Stepper for Seat count if 'SEAT' chosen */}
+                      {bookingType === 'SEAT' && (
+                        <div className="mt-3 p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between">
+                          <span className="text-xs font-bold text-slate-700">How many seats do you need?</span>
+                          <div className="flex items-center gap-3">
+                            <button
+                              type="button"
+                              onClick={() => setSeatsRequested((s) => Math.max(1, s - 1))}
+                              className="w-9 h-9 rounded-xl bg-white border border-slate-300 font-black text-lg text-slate-700 hover:bg-slate-100 flex items-center justify-center shadow-xs"
+                            >
+                              -
+                            </button>
+                            <span className="font-black text-lg w-5 text-center text-slate-900">
+                              {seatsRequested}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setSeatsRequested((s) => Math.min(availableSeats, s + 1))}
+                              className="w-9 h-9 rounded-xl bg-white border border-slate-300 font-black text-lg text-slate-700 hover:bg-slate-100 flex items-center justify-center shadow-xs"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
-                    {/* Cash Payment Guarantee Note */}
-                    <div className="p-3 bg-amber-50 rounded-xl border border-amber-200/80 flex items-center gap-2.5 text-amber-900">
-                      <span className="text-lg">💵</span>
-                      <p className="text-[11px] leading-tight">
-                        <strong>Pay Cash When Boarding:</strong> No credit card or advance payment required.
-                        Pay Rs. {currentPrice.toLocaleString()} directly to driver Tariq.
+                    {/* Step 3: Passenger Details */}
+                    <div className="border-t border-slate-100 pt-3 space-y-3">
+                      <span className="block text-xs font-bold uppercase tracking-wider text-slate-500">
+                        Step 3: Your Name & Phone Number
+                      </span>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-600 mb-1">Your Full Name</label>
+                          <input
+                            type="text"
+                            value={passengerName}
+                            onChange={(e) => setPassengerName(e.target.value)}
+                            placeholder="e.g. Ali Khan"
+                            required
+                            className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                            Mobile Number (for Driver Call)
+                          </label>
+                          <input
+                            type="tel"
+                            value={passengerPhone}
+                            onChange={(e) => setPassengerPhone(e.target.value)}
+                            placeholder="0300-1234567"
+                            required
+                            className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Cash Guarantee Note */}
+                      <div className="p-3 bg-amber-50 rounded-xl border border-amber-200/80 flex items-center gap-2.5 text-amber-900">
+                        <span className="text-lg">💵</span>
+                        <p className="text-[11px] leading-tight">
+                          <strong>Naqad Raqam (Cash on Boarding):</strong> No bank card needed.
+                          Pay Rs. {currentPrice.toLocaleString()} directly to the driver when you board.
+                        </p>
+                      </div>
+
+                      {/* Submit Button */}
+                      <button
+                        type="submit"
+                        disabled={availableSeats <= 0}
+                        className="w-full bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 text-white font-black py-4 px-4 rounded-2xl shadow-md transition text-sm flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
+                      >
+                        <span>Send Booking Request (Rs. {currentPrice.toLocaleString()})</span>
+                        <span>➔</span>
+                      </button>
+                      <p className="text-[11px] text-center text-slate-400 font-medium">
+                        Driver will review and accept your request before it is confirmed.
                       </p>
                     </div>
-
-                    {/* Big Booking Submit Button */}
-                    <button
-                      type="submit"
-                      disabled={availableSeats <= 0}
-                      className="w-full bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 text-white font-black py-4 px-4 rounded-2xl shadow-md transition text-sm flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
-                    >
-                      <span>Book Now for Rs. {currentPrice.toLocaleString()}</span>
-                      <span>➔</span>
-                    </button>
-                    <p className="text-[11px] text-center text-slate-400 font-medium">
-                      Driver will review and accept your request before it is confirmed.
+                  </form>
+                ) : (
+                  <div className="p-6 text-center text-slate-500 bg-slate-50 space-y-2">
+                    <span className="text-3xl block">🚫</span>
+                    <p className="text-sm font-bold text-slate-700">This ride is currently unavailable</p>
+                    <p className="text-xs">
+                      {currentRide.status === 'FULL_CAR_BOOKED'
+                        ? 'The entire car has been reserved by another passenger.'
+                        : currentRide.status === 'SEATS_FILLED'
+                        ? 'All available seats for this journey have been filled.'
+                        : 'The driver cancelled this journey.'}
                     </p>
                   </div>
-                </form>
-              ) : (
-                <div className="p-6 text-center text-slate-500 bg-slate-50 space-y-2">
-                  <span className="text-3xl block">🚫</span>
-                  <p className="text-sm font-bold text-slate-700">This ride is currently unavailable</p>
-                  <p className="text-xs">
-                    {ride.status === 'FULL_CAR_BOOKED'
-                      ? 'The entire car has been booked by another passenger.'
-                      : ride.status === 'SEATS_FILLED'
-                      ? 'All available seats for this journey have been filled.'
-                      : 'The driver cancelled this journey.'}
-                  </p>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            ) : (
+              /* No Rides Found for exact route */
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 text-center space-y-3">
+                <span className="text-3xl block">🔍</span>
+                <h3 className="text-sm font-extrabold text-slate-900">
+                  No direct ride found between {originCity} and {destCity}
+                </h3>
+                <p className="text-xs text-slate-500 max-w-xs mx-auto">
+                  Try selecting one of the popular routes above, or switch to the Driver View to post a ride for this route!
+                </p>
+                <button
+                  onClick={() => {
+                    setNewPostOrigin(originId);
+                    setNewPostDest(destId);
+                    setActiveTab('driver');
+                    setShowDriverPostModal(true);
+                  }}
+                  className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs py-2.5 px-4 rounded-xl transition"
+                >
+                  Post This Route as Driver
+                </button>
+              </div>
+            )}
 
             {/* Passenger My Bookings Tracker */}
             {bookings.length > 0 && (
@@ -770,7 +982,7 @@ export default function Home() {
                         <span className="text-[10px] text-slate-400">ID: {b.id}</span>
                       </div>
 
-                      {/* Accepted Quick Action for Passenger */}
+                      {/* Action for Accepted Booking */}
                       {b.status === 'ACCEPTED' && (
                         <div className="mt-2.5 pt-2 border-t border-emerald-200/80 flex flex-wrap gap-2">
                           <a
@@ -792,10 +1004,10 @@ export default function Home() {
                         </div>
                       )}
 
-                      {/* Auto Conflict Rejection explanation */}
+                      {/* Conflict note */}
                       {b.status === 'REJECTED_AUTO_CONFLICT' && (
                         <p className="text-[11px] text-purple-800 mt-1.5 font-medium">
-                          Note: Another booking for the entire car was accepted, so individual seats could not be allocated.
+                          Note: Another booking for the entire car was accepted, so seat requests were automatically closed.
                         </p>
                       )}
                     </div>
@@ -807,7 +1019,7 @@ export default function Home() {
         )}
 
         {/* ========================================================================= */}
-        {/* DRIVER DASHBOARD VIEW: CLEAN, LARGE CONTROLS */}
+        {/* DRIVER DASHBOARD VIEW */}
         {/* ========================================================================= */}
         {activeTab === 'driver' && (
           <div className="space-y-4">
@@ -816,10 +1028,11 @@ export default function Home() {
               <div className="flex items-center justify-between">
                 <div>
                   <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                    Driver Active Ride
+                    Driver Dashboard
                   </span>
                   <h2 className="text-base font-black text-slate-900">
-                    {originCity} ➔ {destCity}
+                    {NATIONWIDE_CITIES.find((c) => c.id === currentRide.originLocationId)?.name} ➔{' '}
+                    {NATIONWIDE_CITIES.find((c) => c.id === currentRide.destinationLocationId)?.name}
                   </h2>
                   <p className="text-xs text-slate-500">Departure: Today at 07:00 AM • Toyota Corolla</p>
                 </div>
@@ -835,7 +1048,9 @@ export default function Home() {
               <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100 text-center">
                 <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
                   <span className="block text-[10px] text-slate-500 font-bold uppercase">Seats Free</span>
-                  <span className="text-lg font-black text-emerald-700">{availableSeats} / {ride.capacity}</span>
+                  <span className="text-lg font-black text-emerald-700">
+                    {availableSeats} / {currentRide.capacity}
+                  </span>
                 </div>
                 <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
                   <span className="block text-[10px] text-slate-500 font-bold uppercase">Pending</span>
@@ -846,12 +1061,12 @@ export default function Home() {
                 <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
                   <span className="block text-[10px] text-slate-500 font-bold uppercase">Status</span>
                   <span className="text-xs font-black block mt-1 text-slate-800">
-                    {ride.status === 'PUBLISHED' ? 'Active' : ride.status}
+                    {currentRide.status === 'PUBLISHED' ? 'Active' : currentRide.status}
                   </span>
                 </div>
               </div>
 
-              {/* Booking Mode Selector for Driver */}
+              {/* Mode Switching for Driver */}
               <div className="pt-2 border-t border-slate-100">
                 <label className="block text-[11px] font-bold text-slate-600 mb-1.5">
                   Change Ride Mode (Only if no confirmed bookings):
@@ -860,7 +1075,7 @@ export default function Home() {
                   <button
                     onClick={() => handleModeSwitch('WHOLE_CAR_OR_SEATS')}
                     className={`py-2 px-1 text-center rounded-xl text-xs font-bold border transition ${
-                      ride.bookingMode === 'WHOLE_CAR_OR_SEATS'
+                      currentRide.bookingMode === 'WHOLE_CAR_OR_SEATS'
                         ? 'bg-slate-900 text-white border-slate-900'
                         : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
                     }`}
@@ -870,7 +1085,7 @@ export default function Home() {
                   <button
                     onClick={() => handleModeSwitch('WHOLE_CAR')}
                     className={`py-2 px-1 text-center rounded-xl text-xs font-bold border transition ${
-                      ride.bookingMode === 'WHOLE_CAR'
+                      currentRide.bookingMode === 'WHOLE_CAR'
                         ? 'bg-slate-900 text-white border-slate-900'
                         : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
                     }`}
@@ -880,7 +1095,7 @@ export default function Home() {
                   <button
                     onClick={() => handleModeSwitch('SEATS')}
                     className={`py-2 px-1 text-center rounded-xl text-xs font-bold border transition ${
-                      ride.bookingMode === 'SEATS'
+                      currentRide.bookingMode === 'SEATS'
                         ? 'bg-slate-900 text-white border-slate-900'
                         : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
                     }`}
@@ -890,11 +1105,11 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Cancel Ride Button */}
-              {ride.status !== 'CANCELLED' && (
+              {/* Cancel Ride Option */}
+              {currentRide.status !== 'CANCELLED' && (
                 <div className="pt-2 border-t border-slate-100 flex justify-end">
                   <button
-                    onClick={handleCancelRide}
+                    onClick={() => handleCancelRide(currentRide)}
                     className="text-xs font-bold text-rose-700 hover:text-rose-900 hover:underline"
                   >
                     Cancel Entire Ride (Emergency)

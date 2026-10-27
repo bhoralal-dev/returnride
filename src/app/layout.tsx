@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -15,6 +15,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "ReturnRide - Nationwide Intercity Rides in Pakistan",
   description: "Book affordable intercity car rides across Pakistan. Reserve a whole car or individual seats with cash payment.",
+  manifest: "/manifest.json",
+};
+
+export const viewport: Viewport = {
+  themeColor: "#065f46",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
