@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   acceptBookingRequest,
   rejectBookingRequest,
@@ -99,7 +99,7 @@ const INITIAL_RIDES: Ride[] = [
     vehicleId: 'veh-cultus',
     originLocationId: 'loc-pes',
     destinationLocationId: 'loc-isb',
-    departureTime: '2026-11-02T10:00:00Z',
+    departureTime: '2026-11-02T14:00:00Z',
     bookingMode: 'SEATS',
     capacity: 3,
     bookedSeatsCount: 0,
@@ -111,11 +111,70 @@ const INITIAL_RIDES: Ride[] = [
     createdAt: '2026-10-26T13:00:00Z',
     updatedAt: '2026-10-26T13:00:00Z',
   },
+  {
+    id: 'ride-105',
+    driverId: 'driver-bilal',
+    vehicleId: 'veh-civic',
+    originLocationId: 'loc-mul',
+    destinationLocationId: 'loc-lhr',
+    departureTime: '2026-11-02T16:30:00Z',
+    bookingMode: 'WHOLE_CAR_OR_SEATS',
+    capacity: 4,
+    bookedSeatsCount: 0,
+    wholeCarPrice: 14000,
+    seatPrice: 3500,
+    status: 'PUBLISHED',
+    autoReopenOnCancellation: true,
+    notes: 'Honda Civic. Comfortable motorway ride. Departure near Multan bypass.',
+    createdAt: '2026-10-26T14:00:00Z',
+    updatedAt: '2026-10-26T14:00:00Z',
+  },
+  {
+    id: 'ride-106',
+    driverId: 'driver-jameel',
+    vehicleId: 'veh-corolla-gl',
+    originLocationId: 'loc-suk',
+    destinationLocationId: 'loc-khi',
+    departureTime: '2026-11-02T20:00:00Z',
+    bookingMode: 'WHOLE_CAR_OR_SEATS',
+    capacity: 4,
+    bookedSeatsCount: 0,
+    wholeCarPrice: 18000,
+    seatPrice: 4500,
+    status: 'PUBLISHED',
+    autoReopenOnCancellation: true,
+    notes: 'Night travel. Safe and smooth drive via National Highway.',
+    createdAt: '2026-10-26T15:00:00Z',
+    updatedAt: '2026-10-26T15:00:00Z',
+  },
+  {
+    id: 'ride-107',
+    driverId: 'driver-rasheed',
+    vehicleId: 'veh-alto',
+    originLocationId: 'loc-mpk',
+    destinationLocationId: 'loc-hyd',
+    departureTime: '2026-11-02T11:00:00Z',
+    bookingMode: 'SEATS',
+    capacity: 3,
+    bookedSeatsCount: 0,
+    wholeCarPrice: 3600,
+    seatPrice: 1200,
+    status: 'PUBLISHED',
+    autoReopenOnCancellation: true,
+    notes: 'Suzuki Alto AC. Fast connection between Mirpur Khas and Hyderabad.',
+    createdAt: '2026-10-26T16:00:00Z',
+    updatedAt: '2026-10-26T16:00:00Z',
+  },
 ];
 
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+}
+
 export default function Home() {
-  // Navigation: passenger vs driver mode
-  const [activeTab, setActiveTab] = useState<'passenger' | 'driver'>('passenger');
+  // Navigation: passenger, all_rides, or driver mode
+  const [activeTab, setActiveTab] = useState<'passenger' | 'all_rides' | 'driver'>('passenger');
 
   // Rides & Bookings State
   const [rides, setRides] = useState<Ride[]>(INITIAL_RIDES);
@@ -123,9 +182,19 @@ export default function Home() {
   const [bookings, setBookings] = useState<BookingRequest[]>([]);
   const [isClientLoaded, setIsClientLoaded] = useState(false);
 
-  // Search & Filter State
+  // PWA Install State
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [isAppInstalled, setIsAppInstalled] = useState(false);
+
+  // Quick Search State (Passenger View)
   const [originId, setOriginId] = useState<string>('loc-uk');
   const [destId, setDestId] = useState<string>('loc-khi');
+
+  // Directory Filter State (All Rides View)
+  const [filterOrigin, setFilterOrigin] = useState<string>('ALL');
+  const [filterDest, setFilterDest] = useState<string>('ALL');
+  const [filterTime, setFilterTime] = useState<'ALL' | 'MORNING' | 'AFTERNOON' | 'EVENING'>('ALL');
+  const [filterMode, setFilterMode] = useState<'ALL' | 'WHOLE_CAR' | 'SEATS'>('ALL');
 
   // Passenger booking form
   const [passengerName, setPassengerName] = useState('Muhammad Ali');
@@ -147,11 +216,11 @@ export default function Home() {
     description: string;
   } | null>({
     type: 'info',
-    title: 'ReturnRide Pakistan (Mobile-First Prototype)',
-    description: 'Book full car or single seats with cash on boarding. Switch between Passenger and Driver views to test.',
+    title: 'ReturnRide Pakistan (Mobile-First Marketplace)',
+    description: 'Book full car or single seats with cash on boarding. Switch tabs to search, browse all listings, or view driver dashboard.',
   });
 
-  // Load from localStorage on client mount
+  // Client-side initialization and PWA install prompt handler
   useEffect(() => {
     try {
       const savedRides = localStorage.getItem('returnride_rides');
@@ -163,28 +232,57 @@ export default function Home() {
         setBookings(JSON.parse(savedBookings));
       }
     } catch {
-      // Ignore localStorage read failures
+      // Ignore localStorage read errors
     }
     setIsClientLoaded(true);
+
+    const handleBeforeInstall = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e as BeforeInstallPromptEvent);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+    window.addEventListener('appinstalled', () => {
+      setIsAppInstalled(true);
+      setDeferredPrompt(null);
+    });
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+    };
   }, []);
 
-  // Save to localStorage when state changes
+  // Save changes to localStorage
   useEffect(() => {
     if (!isClientLoaded) return;
     try {
       localStorage.setItem('returnride_rides', JSON.stringify(rides));
       localStorage.setItem('returnride_bookings', JSON.stringify(bookings));
     } catch {
-      // Ignore localStorage write failures
+      // Ignore localStorage write errors
     }
   }, [rides, bookings, isClientLoaded]);
+
+  // Handle PWA installation
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) {
+      alert('To install ReturnRide on your phone:\n1. Tap the 3 dots (⋮) in your mobile browser.\n2. Tap "Install App" or "Add to Home Screen".');
+      return;
+    }
+    await deferredPrompt.prompt();
+    const choice = await deferredPrompt.userChoice;
+    if (choice.outcome === 'accepted') {
+      setIsAppInstalled(true);
+    }
+    setDeferredPrompt(null);
+  };
 
   // Current active ride
   const currentRide = rides.find((r) => r.id === selectedRideId) || rides[0];
   const rideBookings = bookings.filter((b) => b.rideId === currentRide.id);
   const availableSeats = calculateAvailableSeats(currentRide, rideBookings);
 
-  // Matching rides for the selected search route
+  // Search matching rides
   const matchingRides = rides.filter(
     (r) => r.originLocationId === originId && r.destinationLocationId === destId
   );
@@ -192,7 +290,30 @@ export default function Home() {
   const originCity = NATIONWIDE_CITIES.find((c) => c.id === originId)?.name || 'Origin';
   const destCity = NATIONWIDE_CITIES.find((c) => c.id === destId)?.name || 'Destination';
 
-  // Calculate price
+  // Filtered rides for the "All Ride Listings" view
+  const filteredAllRides = useMemo(() => {
+    return rides.filter((r) => {
+      // City filters
+      if (filterOrigin !== 'ALL' && r.originLocationId !== filterOrigin) return false;
+      if (filterDest !== 'ALL' && r.destinationLocationId !== filterDest) return false;
+
+      // Booking mode filter
+      if (filterMode === 'WHOLE_CAR' && r.bookingMode === 'SEATS') return false;
+      if (filterMode === 'SEATS' && r.bookingMode === 'WHOLE_CAR') return false;
+
+      // Time filter
+      if (filterTime !== 'ALL') {
+        const hour = new Date(r.departureTime).getUTCHours();
+        if (filterTime === 'MORNING' && (hour < 5 || hour >= 12)) return false;
+        if (filterTime === 'AFTERNOON' && (hour < 12 || hour >= 18)) return false;
+        if (filterTime === 'EVENING' && (hour < 18 && hour >= 5)) return false;
+      }
+
+      return true;
+    });
+  }, [rides, filterOrigin, filterDest, filterTime, filterMode]);
+
+  // Price calculation
   const currentPrice =
     bookingType === 'WHOLE_CAR'
       ? currentRide.wholeCarPrice
@@ -219,7 +340,7 @@ export default function Home() {
       setBanner({
         type: 'success',
         title: 'Request Sent to Driver!',
-        description: `Your request for ${bookingType === 'WHOLE_CAR' ? 'the Full Car' : `${seatsToBook} seat(s)`} has been sent. Driver will review and accept it.`,
+        description: `Your request for ${bookingType === 'WHOLE_CAR' ? 'the Full Car' : `${seatsToBook} seat(s)`} has been submitted. The driver will review and accept it.`,
       });
     } catch (err: unknown) {
       if (err instanceof BookingEngineError) {
@@ -230,7 +351,7 @@ export default function Home() {
     }
   };
 
-  // Driver accepts a booking request
+  // Driver accepts request
   const handleAcceptRequest = (request: BookingRequest) => {
     try {
       const targetRide = rides.find((r) => r.id === request.rideId);
@@ -246,10 +367,8 @@ export default function Home() {
         confirmedBookings: currentRideBookings,
       });
 
-      // Update ride in rides array
       setRides((prev) => prev.map((r) => (r.id === result.updatedRide.id ? result.updatedRide : r)));
 
-      // Update bookings
       setBookings((prev) =>
         prev.map((b) => {
           if (b.id === result.acceptedRequest.id) return result.acceptedRequest;
@@ -264,7 +383,7 @@ export default function Home() {
         type: 'success',
         title: 'Booking Confirmed!',
         description: `Request accepted for ${request.passengerId}. ${
-          conflictCount > 0 ? `${conflictCount} conflicting requests were automatically rejected.` : ''
+          conflictCount > 0 ? `${conflictCount} conflicting requests were automatically closed.` : ''
         }`,
       });
     } catch (err: unknown) {
@@ -274,10 +393,10 @@ export default function Home() {
     }
   };
 
-  // Driver rejects a booking request
+  // Driver rejects request
   const handleRejectRequest = (request: BookingRequest) => {
     try {
-      const rejected = rejectBookingRequest(request, 'Driver is unavailable or seats filled.');
+      const rejected = rejectBookingRequest(request, 'Driver is unavailable or capacity is filled.');
       setBookings((prev) => prev.map((b) => (b.id === request.id ? rejected : b)));
       setBanner({
         type: 'info',
@@ -291,7 +410,7 @@ export default function Home() {
     }
   };
 
-  // Driver or passenger cancels a confirmed booking
+  // Cancel booking
   const handleCancelBooking = (booking: BookingRequest) => {
     try {
       const targetRide = rides.find((r) => r.id === booking.rideId);
@@ -301,7 +420,7 @@ export default function Home() {
         ride: targetRide,
         booking,
         cancelledBy: 'DRIVER',
-        reason: 'Passenger requested cancellation over phone call',
+        reason: 'Passenger requested cancellation',
       });
 
       setRides((prev) => prev.map((r) => (r.id === result.updatedRide.id ? result.updatedRide : r)));
@@ -318,7 +437,7 @@ export default function Home() {
     }
   };
 
-  // Driver cancels entire ride
+  // Cancel entire ride
   const handleCancelRide = (rideToCancel: Ride) => {
     if (!confirm('Are you sure you want to cancel this entire ride? All passengers will be notified.')) {
       return;
@@ -328,7 +447,7 @@ export default function Home() {
       const result = cancelRide({
         ride: rideToCancel,
         driverId: rideToCancel.driverId,
-        reason: 'Emergency or mechanical vehicle issue',
+        reason: 'Emergency or mechanical vehicle breakdown',
         confirmedBookings: rideBookingsList,
         pendingRequests: rideBookingsList,
       });
@@ -356,7 +475,7 @@ export default function Home() {
     }
   };
 
-  // Driver switches booking mode
+  // Switch mode
   const handleModeSwitch = (newMode: RideBookingMode) => {
     try {
       const result = switchRideBookingMode({
@@ -392,7 +511,7 @@ export default function Home() {
     }
   };
 
-  // Reset demo state
+  // Reset demo
   const handleReset = () => {
     try {
       localStorage.removeItem('returnride_rides');
@@ -412,7 +531,7 @@ export default function Home() {
     });
   };
 
-  // Driver publishes a new custom ride route
+  // Driver publishes new ride
   const handlePublishNewRide = (e: React.FormEvent) => {
     e.preventDefault();
     const newRide: Ride = {
@@ -429,7 +548,7 @@ export default function Home() {
       seatPrice: Number(newPostSeatPrice),
       status: 'PUBLISHED',
       autoReopenOnCancellation: true,
-      notes: 'Clean car with AC. Trunk space available for standard luggage.',
+      notes: 'Clean car with AC. Trunk space available for luggage.',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -439,6 +558,7 @@ export default function Home() {
     setOriginId(newPostOrigin);
     setDestId(newPostDest);
     setShowDriverPostModal(false);
+    setActiveTab('passenger');
     setBanner({
       type: 'success',
       title: 'New Journey Published!',
@@ -448,62 +568,126 @@ export default function Home() {
     });
   };
 
+  // Select ride from all listings
+  const handleSelectFromDirectory = (rideItem: Ride) => {
+    setSelectedRideId(rideItem.id);
+    setOriginId(rideItem.originLocationId);
+    setDestId(rideItem.destinationLocationId);
+    setActiveTab('passenger');
+    setBanner({
+      type: 'info',
+      title: 'Ride Selected',
+      description: `Selected ${NATIONWIDE_CITIES.find((c) => c.id === rideItem.originLocationId)?.name} ➔ ${
+        NATIONWIDE_CITIES.find((c) => c.id === rideItem.destinationLocationId)?.name
+      }. Choose Whole Car or Seats below.`,
+    });
+  };
+
+  // Helper to format driver name
+  const getDriverName = (driverId: string) => {
+    switch (driverId) {
+      case 'driver-tariq':
+        return 'Tariq Khan';
+      case 'driver-aslam':
+        return 'Aslam Memon';
+      case 'driver-kamran':
+        return 'Kamran Butt';
+      case 'driver-farhan':
+        return 'Farhan Shinwari';
+      case 'driver-bilal':
+        return 'Bilal Shah';
+      case 'driver-jameel':
+        return 'Jameel Soomro';
+      case 'driver-rasheed':
+        return 'Rasheed Ahmed';
+      default:
+        return 'Verified Driver';
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-900 font-sans antialiased pb-20">
+    <div className="min-h-screen bg-slate-100 text-slate-900 font-sans antialiased pb-24">
       {/* ========================================================================= */}
-      {/* TOP HEADER */}
+      {/* TOP HEADER & APP INSTALL BAR */}
       {/* ========================================================================= */}
       <header className="bg-emerald-800 text-white shadow-md sticky top-0 z-30">
-        <div className="max-w-xl mx-auto px-4 py-3 flex items-center justify-between">
+        <div className="max-w-xl mx-auto px-4 py-2.5 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-2xl" role="img" aria-label="car">🚗</span>
             <div>
               <h1 className="text-xl font-black tracking-tight leading-none">ReturnRide</h1>
-              <p className="text-[11px] text-emerald-200 font-medium">Pakistan Intercity Ride Marketplace</p>
+              <p className="text-[11px] text-emerald-200 font-medium">Pakistan Intercity Marketplace</p>
             </div>
           </div>
 
-          <button
-            onClick={handleReset}
-            className="text-xs bg-emerald-950/60 hover:bg-emerald-950 text-emerald-200 hover:text-white px-3 py-1.5 rounded-lg border border-emerald-600/50 transition font-medium"
-          >
-            Reset Demo
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Install App Button */}
+            {!isAppInstalled && (
+              <button
+                onClick={handleInstallClick}
+                className="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1 shadow-xs transition"
+                title="Install App on Phone"
+              >
+                <span>📲</span>
+                <span className="hidden sm:inline">Install App</span>
+                <span className="sm:hidden">App</span>
+              </button>
+            )}
+
+            <button
+              onClick={handleReset}
+              className="text-xs bg-emerald-950/60 hover:bg-emerald-950 text-emerald-200 hover:text-white px-2.5 py-1.5 rounded-lg border border-emerald-600/50 transition font-medium"
+            >
+              Reset
+            </button>
+          </div>
         </div>
 
-        {/* Big Touch Tabs */}
-        <div className="max-w-xl mx-auto px-4 grid grid-cols-2 gap-2 pb-2">
+        {/* 3 Main Tabs: Book, All Listings, Driver */}
+        <div className="max-w-xl mx-auto px-4 grid grid-cols-3 gap-1.5 pb-2">
           <button
             onClick={() => setActiveTab('passenger')}
-            className={`py-2.5 px-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition shadow-sm ${
+            className={`py-2 px-1 rounded-xl font-bold text-xs flex flex-col sm:flex-row items-center justify-center gap-1 transition shadow-sm ${
               activeTab === 'passenger'
-                ? 'bg-white text-emerald-900 shadow-md ring-2 ring-emerald-400'
+                ? 'bg-white text-emerald-900 shadow-md ring-2 ring-emerald-400 font-black'
                 : 'bg-emerald-900/60 text-emerald-100 hover:bg-emerald-900'
             }`}
           >
             <span>🙋‍♂️</span>
-            <span>I Need a Ride</span>
+            <span>Book Ride</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('all_rides')}
+            className={`py-2 px-1 rounded-xl font-bold text-xs flex flex-col sm:flex-row items-center justify-center gap-1 transition shadow-sm ${
+              activeTab === 'all_rides'
+                ? 'bg-white text-emerald-900 shadow-md ring-2 ring-emerald-400 font-black'
+                : 'bg-emerald-900/60 text-emerald-100 hover:bg-emerald-900'
+            }`}
+          >
+            <span>📋</span>
+            <span>All Listings ({rides.length})</span>
           </button>
 
           <button
             onClick={() => setActiveTab('driver')}
-            className={`py-2.5 px-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition shadow-sm ${
+            className={`py-2 px-1 rounded-xl font-bold text-xs flex flex-col sm:flex-row items-center justify-center gap-1 transition shadow-sm ${
               activeTab === 'driver'
-                ? 'bg-white text-emerald-900 shadow-md ring-2 ring-emerald-400'
+                ? 'bg-white text-emerald-900 shadow-md ring-2 ring-emerald-400 font-black'
                 : 'bg-emerald-900/60 text-emerald-100 hover:bg-emerald-900'
             }`}
           >
             <span>🚘</span>
-            <span>Driver View ({bookings.filter((b) => b.status === 'PENDING').length})</span>
+            <span>Driver ({bookings.filter((b) => b.status === 'PENDING').length})</span>
           </button>
         </div>
       </header>
 
       {/* ========================================================================= */}
-      {/* MAIN CONTENT AREA */}
+      {/* MAIN CONTENT CONTAINER */}
       {/* ========================================================================= */}
-      <main className="max-w-xl mx-auto px-4 pt-4 space-y-4">
-        {/* Simple Notification Alert */}
+      <main className="max-w-xl mx-auto px-4 pt-3.5 space-y-4">
+        {/* Simple Notification Banner */}
         {banner && (
           <div
             className={`p-3.5 rounded-2xl border flex items-start justify-between shadow-sm transition ${
@@ -534,7 +718,7 @@ export default function Home() {
         )}
 
         {/* ========================================================================= */}
-        {/* PASSENGER VIEW */}
+        {/* TAB 1: PASSENGER VIEW (3-STEP GUIDED BOOKING) */}
         {/* ========================================================================= */}
         {activeTab === 'passenger' && (
           <div className="space-y-4">
@@ -544,9 +728,12 @@ export default function Home() {
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
                   Step 1: Where do you want to travel?
                 </span>
-                <span className="text-xs bg-slate-100 text-slate-700 px-2 py-0.5 rounded-full font-semibold">
-                  Nationwide Routes
-                </span>
+                <button
+                  onClick={() => setActiveTab('all_rides')}
+                  className="text-xs text-emerald-700 font-bold hover:underline"
+                >
+                  Browse all {rides.length} rides ➔
+                </button>
               </div>
 
               {/* Visual Route Indicator */}
@@ -606,7 +793,7 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Quick Popular Route Chips */}
+              {/* Popular Pakistani Routes Chips */}
               <div className="mt-3 pt-2.5 border-t border-slate-100">
                 <span className="block text-[10px] text-slate-400 font-bold uppercase mb-1.5">
                   Popular Routes (Tap to switch):
@@ -644,19 +831,19 @@ export default function Home() {
                   </button>
                   <button
                     onClick={() => {
-                      setOriginId('loc-pes');
-                      setDestId('loc-isb');
-                      setSelectedRideId('ride-104');
+                      setOriginId('loc-suk');
+                      setDestId('loc-khi');
+                      setSelectedRideId('ride-106');
                     }}
                     className="text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-800 px-2.5 py-1 rounded-lg font-medium transition"
                   >
-                    Peshawar ➔ Islamabad
+                    Sukkur ➔ Karachi
                   </button>
                 </div>
               </div>
             </div>
 
-            {/* Ride Card (Matching or Active) */}
+            {/* Ride Card */}
             {matchingRides.length > 0 ? (
               <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                 {/* Driver & Ride Header */}
@@ -668,13 +855,7 @@ export default function Home() {
                     <div>
                       <div className="flex items-center gap-1.5">
                         <span className="font-extrabold text-slate-900 text-base">
-                          {currentRide.driverId === 'driver-tariq'
-                            ? 'Tariq Khan'
-                            : currentRide.driverId === 'driver-aslam'
-                            ? 'Aslam Memon'
-                            : currentRide.driverId === 'driver-kamran'
-                            ? 'Kamran Butt'
-                            : 'Farhan Shinwari'}
+                          {getDriverName(currentRide.driverId)}
                         </span>
                         <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-bold">
                           VERIFIED
@@ -718,7 +899,7 @@ export default function Home() {
                       availableSeats > 0 ? 'text-emerald-700' : 'text-rose-600'
                     }`}
                   >
-                    {availableSeats} of {currentRide.capacity} seats remaining
+                    {availableSeats} of {currentRide.capacity} seats free
                   </span>
                 </div>
 
@@ -914,18 +1095,13 @@ export default function Home() {
                   No direct ride found between {originCity} and {destCity}
                 </h3>
                 <p className="text-xs text-slate-500 max-w-xs mx-auto">
-                  Try selecting one of the popular routes above, or switch to the Driver View to post a ride for this route!
+                  Browse all active rides across Pakistan or post a new route as a driver!
                 </p>
                 <button
-                  onClick={() => {
-                    setNewPostOrigin(originId);
-                    setNewPostDest(destId);
-                    setActiveTab('driver');
-                    setShowDriverPostModal(true);
-                  }}
-                  className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs py-2.5 px-4 rounded-xl transition"
+                  onClick={() => setActiveTab('all_rides')}
+                  className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs py-2.5 px-4 rounded-xl transition shadow-xs"
                 >
-                  Post This Route as Driver
+                  View All Nationwide Rides
                 </button>
               </div>
             )}
@@ -1019,7 +1195,206 @@ export default function Home() {
         )}
 
         {/* ========================================================================= */}
-        {/* DRIVER DASHBOARD VIEW */}
+        {/* TAB 2: ALL RIDE LISTINGS (FULL DIRECTORY WITH FILTERS) */}
+        {/* ========================================================================= */}
+        {activeTab === 'all_rides' && (
+          <div className="space-y-4">
+            {/* Filter Panel */}
+            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-1.5">
+                  <span>🔍</span>
+                  <span>Filter Nationwide Rides</span>
+                </h3>
+                <button
+                  onClick={() => {
+                    setFilterOrigin('ALL');
+                    setFilterDest('ALL');
+                    setFilterTime('ALL');
+                    setFilterMode('ALL');
+                  }}
+                  className="text-[11px] text-emerald-700 font-bold hover:underline"
+                >
+                  Clear Filters
+                </button>
+              </div>
+
+              {/* City Filters */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 mb-1">From (Origin)</label>
+                  <select
+                    value={filterOrigin}
+                    onChange={(e) => setFilterOrigin(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="ALL">All Departure Cities</option>
+                    {NATIONWIDE_CITIES.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 mb-1">To (Destination)</label>
+                  <select
+                    value={filterDest}
+                    onChange={(e) => setFilterDest(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="ALL">All Arrival Cities</option>
+                    {NATIONWIDE_CITIES.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Time & Mode Filters */}
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 mb-1">Departure Time</label>
+                  <select
+                    value={filterTime}
+                    onChange={(e) => setFilterTime(e.target.value as 'ALL' | 'MORNING' | 'AFTERNOON' | 'EVENING')}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="ALL">Any Time</option>
+                    <option value="MORNING">Morning (06:00 - 12:00)</option>
+                    <option value="AFTERNOON">Afternoon (12:00 - 18:00)</option>
+                    <option value="EVENING">Evening / Night (18:00+)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 mb-1">Booking Type</label>
+                  <select
+                    value={filterMode}
+                    onChange={(e) => setFilterMode(e.target.value as 'ALL' | 'WHOLE_CAR' | 'SEATS')}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="ALL">All Types</option>
+                    <option value="WHOLE_CAR">Whole Car Available</option>
+                    <option value="SEATS">Single Seats Available</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Listings Feed */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-xs text-slate-500 font-bold px-1">
+                <span>Showing {filteredAllRides.length} Available Ride(s)</span>
+                <span>Sorted by Departure</span>
+              </div>
+
+              {filteredAllRides.length === 0 ? (
+                <div className="bg-white p-8 rounded-2xl border border-slate-200 text-center space-y-2">
+                  <span className="text-3xl block">🚙</span>
+                  <p className="text-sm font-bold text-slate-800">No rides match your filter</p>
+                  <p className="text-xs text-slate-500">
+                    Try clearing your city or time filters to see all nationwide rides.
+                  </p>
+                  <button
+                    onClick={() => {
+                      setFilterOrigin('ALL');
+                      setFilterDest('ALL');
+                      setFilterTime('ALL');
+                      setFilterMode('ALL');
+                    }}
+                    className="bg-emerald-700 text-white font-bold text-xs py-2 px-4 rounded-xl transition"
+                  >
+                    Reset Filters
+                  </button>
+                </div>
+              ) : (
+                filteredAllRides.map((rideItem) => {
+                  const oCity = NATIONWIDE_CITIES.find((c) => c.id === rideItem.originLocationId)?.name || 'Origin';
+                  const dCity = NATIONWIDE_CITIES.find((c) => c.id === rideItem.destinationLocationId)?.name || 'Destination';
+                  const currentBookings = bookings.filter((b) => b.rideId === rideItem.id);
+                  const freeSeats = calculateAvailableSeats(rideItem, currentBookings);
+                  const timeFormatted = new Date(rideItem.departureTime).toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: true,
+                  });
+
+                  return (
+                    <div
+                      key={rideItem.id}
+                      className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 hover:border-emerald-300 transition space-y-3"
+                    >
+                      {/* Route & Status */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base font-black text-slate-900">{oCity}</span>
+                          <span className="text-emerald-700 font-bold">➔</span>
+                          <span className="text-base font-black text-slate-900">{dCity}</span>
+                        </div>
+
+                        <span
+                          className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase ${
+                            rideItem.status === 'PUBLISHED'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : rideItem.status === 'FULL_CAR_BOOKED'
+                              ? 'bg-purple-100 text-purple-800'
+                              : 'bg-amber-100 text-amber-800'
+                          }`}
+                        >
+                          {rideItem.status === 'PUBLISHED' ? `${freeSeats} Seats Free` : rideItem.status}
+                        </span>
+                      </div>
+
+                      {/* Driver & Departure Details */}
+                      <div className="flex items-center justify-between text-xs text-slate-500 border-y border-slate-100 py-2">
+                        <div>
+                          <span className="font-bold text-slate-700">{getDriverName(rideItem.driverId)}</span>
+                          <span className="block text-[11px] text-slate-400">Departure: {timeFormatted}</span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[11px] bg-slate-100 px-2 py-0.5 rounded-full font-semibold text-slate-600">
+                            {rideItem.bookingMode === 'WHOLE_CAR'
+                              ? '🚗 Full Car'
+                              : rideItem.bookingMode === 'SEATS'
+                              ? '💺 Seats Only'
+                              : '🚗 Full Car or 💺 Seats'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Pricing & Select Action */}
+                      <div className="flex items-center justify-between pt-1">
+                        <div>
+                          <span className="text-xs text-slate-500 font-medium block">
+                            {rideItem.seatPrice ? `Per Seat: Rs. ${rideItem.seatPrice.toLocaleString()}` : ''}
+                          </span>
+                          <span className="text-sm font-black text-emerald-800">
+                            Whole Car: Rs. {rideItem.wholeCarPrice.toLocaleString()}
+                          </span>
+                        </div>
+
+                        <button
+                          onClick={() => handleSelectFromDirectory(rideItem)}
+                          className="bg-emerald-700 hover:bg-emerald-800 text-white font-extrabold text-xs py-2 px-3.5 rounded-xl transition shadow-xs flex items-center gap-1"
+                        >
+                          <span>Book This</span>
+                          <span>➔</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB 3: DRIVER DASHBOARD VIEW */}
         {/* ========================================================================= */}
         {activeTab === 'driver' && (
           <div className="space-y-4">
@@ -1135,7 +1510,7 @@ export default function Home() {
                   <span className="text-2xl block">📬</span>
                   <p className="text-xs font-bold text-slate-700">No requests yet</p>
                   <p className="text-[11px] text-slate-500">
-                    Switch to &quot;I Need a Ride&quot; tab above and submit a request to test this flow.
+                    Switch to &quot;Book Ride&quot; tab above and submit a request to test this flow.
                   </p>
                 </div>
               ) : (
