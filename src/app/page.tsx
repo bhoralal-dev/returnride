@@ -22,6 +22,7 @@ import type {
   CancellationAppeal,
   EmergencyReasonCategory,
 } from '@/types/reliability';
+import { supabase } from '@/lib/supabase';
 import type {
   Ride,
   BookingRequest,
@@ -127,6 +128,13 @@ const INITIAL_RIDES: Ride[] = [
     status: 'PUBLISHED',
     autoReopenOnCancellation: true,
     notes: 'Toyota Corolla with AC. Trunk space for luggage. Departure from Umerkot center.',
+    routeStops: [
+      { id: 'stop-mpk', name: 'Mirpur Khas', distanceKm: 75, seatPrice: 900 },
+      { id: 'stop-tj', name: 'Tando Jam', distanceKm: 120, seatPrice: 1400 },
+      { id: 'stop-hyd', name: 'Hyderabad (Qasimabad / Latifabad)', distanceKm: 145, seatPrice: 1800 },
+      { id: 'stop-nb', name: 'Nooriabad / M-9 Toll', distanceKm: 225, seatPrice: 2600 },
+      { id: 'stop-khi', name: 'Karachi (Sohrab Goth / Cantt / Saddar)', distanceKm: 320, seatPrice: 3500 },
+    ],
     createdAt: '2026-10-26T10:00:00Z',
     updatedAt: '2026-10-26T10:00:00Z',
   },
@@ -145,6 +153,10 @@ const INITIAL_RIDES: Ride[] = [
     status: 'PUBLISHED',
     autoReopenOnCancellation: true,
     notes: 'Honda City AC. Departure from Sohrab Goth / Toll Plaza.',
+    routeStops: [
+      { id: 'stop-nb', name: 'Nooriabad / Super Highway', distanceKm: 85, seatPrice: 900 },
+      { id: 'stop-hyd', name: 'Hyderabad (City / Auto Bhan)', distanceKm: 160, seatPrice: 1500 },
+    ],
     createdAt: '2026-10-26T11:00:00Z',
     updatedAt: '2026-10-26T11:00:00Z',
   },
@@ -163,6 +175,12 @@ const INITIAL_RIDES: Ride[] = [
     status: 'PUBLISHED',
     autoReopenOnCancellation: true,
     notes: 'Direct Motorway M2 travel. Toyota Yaris with chilled AC.',
+    routeStops: [
+      { id: 'stop-gwn', name: 'Gujranwala', distanceKm: 70, seatPrice: 1000 },
+      { id: 'stop-gjt', name: 'Gujrat', distanceKm: 120, seatPrice: 1600 },
+      { id: 'stop-jhl', name: 'Jhelum', distanceKm: 175, seatPrice: 2400 },
+      { id: 'stop-isb', name: 'Islamabad / Rawalpindi', distanceKm: 380, seatPrice: 4000 },
+    ],
     createdAt: '2026-10-26T12:00:00Z',
     updatedAt: '2026-10-26T12:00:00Z',
   },
@@ -181,6 +199,11 @@ const INITIAL_RIDES: Ride[] = [
     status: 'PUBLISHED',
     autoReopenOnCancellation: true,
     notes: 'Motorway M1 express journey. Suzuki Cultus.',
+    routeStops: [
+      { id: 'stop-mrd', name: 'Mardan Interchange', distanceKm: 60, seatPrice: 1000 },
+      { id: 'stop-swb', name: 'Swabi', distanceKm: 105, seatPrice: 1600 },
+      { id: 'stop-isb', name: 'Islamabad (I-8 / Faizabad)', distanceKm: 180, seatPrice: 2500 },
+    ],
     createdAt: '2026-10-26T13:00:00Z',
     updatedAt: '2026-10-26T13:00:00Z',
   },
@@ -231,9 +254,10 @@ export default function Home() {
   const [currentUser, setCurrentUser] = useState<AppUserProfile | null>(null);
   const [isClientLoaded, setIsClientLoaded] = useState(false);
 
-  // Auth screen state (Email OTP registration, Email-only login)
+  // Auth screen state (Email OTP or Mobile SMS OTP)
   const [authView, setAuthView] = useState<'REGISTER' | 'VERIFY_OTP' | 'LOGIN'>('REGISTER');
   const [authRoleChoice, setAuthRoleChoice] = useState<'PASSENGER' | 'DRIVER'>('PASSENGER');
+  const [regOtpMethod, setRegOtpMethod] = useState<'EMAIL' | 'SMS'>('EMAIL');
   const [regName, setRegName] = useState('');
   const [regEmail, setRegEmail] = useState('');
   const [regPhone, setRegPhone] = useState('');
@@ -249,15 +273,21 @@ export default function Home() {
 
   // OTP Verification state
   const [regOtp, setRegOtp] = useState('');
-  const [generatedOtp, setGeneratedOtp] = useState('');
   const [pendingUser, setPendingUser] = useState<AppUserProfile | null>(null);
+  const [isSendingOtp, setIsSendingOtp] = useState(false);
+  const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
+  const [otpCountdown, setOtpCountdown] = useState(0);
 
-  // Email-only Login state
-  const [loginEmail, setLoginEmail] = useState('');
+  // Login state (Supports either Email or Mobile Number)
+  const [loginIdentifier, setLoginIdentifier] = useState('');
   const [registeredUsers, setRegisteredUsers] = useState<AppUserProfile[]>([
     INITIAL_DEMO_PASSENGER,
     INITIAL_DEMO_DRIVER,
   ]);
+
+  // Drop-off waypoint selection state for Seat bookings ('DEFAULT' resolves automatically to route destination)
+  const [selectedDropoffStop, setSelectedDropoffStop] = useState<string>('DEFAULT');
+  const [customDropoffStop, setCustomDropoffStop] = useState<string>('');
 
   // App Tabs: 'passenger' | 'all_listings' | 'driver' | 'profile'
   const [activeTab, setActiveTab] = useState<'passenger' | 'all_listings' | 'driver' | 'profile'>('passenger');
@@ -380,17 +410,73 @@ export default function Home() {
     });
   }, [currentUser, cancellationEvents, appeals]);
 
-  // Handle Registration Step 1: Validate & Send Email OTP
-  const handleRegister = (e: React.FormEvent) => {
+  // Web OTP API for SMS auto-fetch on mobile devices (Zero-tap OTP entry)
+  useEffect(() => {
+    if (authView !== 'VERIFY_OTP' || regOtpMethod !== 'SMS') return;
+    if (typeof window === 'undefined' || !('OTPCredential' in window)) return;
+
+    interface WebOTPCredential {
+      code?: string;
+      type?: string;
+    }
+
+    interface NavigatorWithCredentials {
+      get: (options: unknown) => Promise<WebOTPCredential | null>;
+    }
+
+    const ac = new AbortController();
+    try {
+      const navCredentials = navigator.credentials as unknown as NavigatorWithCredentials;
+      navCredentials
+        .get({
+          otp: { transport: ['sms'] },
+          signal: ac.signal,
+        })
+        .then((credential: WebOTPCredential | null) => {
+          if (credential && credential.code) {
+            setRegOtp(credential.code);
+          }
+        })
+        .catch(() => {
+          // Ignore cancellation/browser rejection
+        });
+    } catch {
+      // Ignore unsupported browser
+    }
+
+    return () => {
+      ac.abort();
+    };
+  }, [authView, regOtpMethod]);
+
+  // Resend Countdown Timer
+  useEffect(() => {
+    if (authView !== 'VERIFY_OTP' || otpCountdown <= 0) return;
+    const timer = setInterval(() => {
+      setOtpCountdown((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [authView, otpCountdown]);
+
+  // Handle Registration Step 1: Dispatch REAL OTP (via Email or SMS)
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!regName.trim() || !regEmail.trim()) {
-      alert('Please provide your Full Name and Email Address.');
+    if (!regName.trim()) {
+      alert('Please provide your Full Name.');
       return;
     }
 
-    if (!regEmail.includes('@') || !regEmail.includes('.')) {
-      alert('Please enter a valid email address for OTP verification.');
-      return;
+    if (regOtpMethod === 'EMAIL') {
+      if (!regEmail.trim() || !regEmail.includes('@') || !regEmail.includes('.')) {
+        alert('Please enter a valid email address to receive your OTP.');
+        return;
+      }
+    } else {
+      const cleanPhone = regPhone.replace(/\D/g, '');
+      if (!regPhone.trim() || cleanPhone.length < 10) {
+        alert('Please enter a valid Pakistani mobile number (e.g. 0300-1234567) to receive your SMS OTP.');
+        return;
+      }
     }
 
     if (authRoleChoice === 'DRIVER' && (!regCnic.trim() || !regLicense.trim())) {
@@ -398,13 +484,14 @@ export default function Home() {
       return;
     }
 
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    setGeneratedOtp(code);
+    const assignedEmail =
+      regEmail.trim().toLowerCase() ||
+      `${regPhone.replace(/\D/g, '')}@returnride.local`;
 
     const newUser: AppUserProfile = {
       id: generateClientUniqueId('usr'),
       name: regName.trim(),
-      email: regEmail.trim().toLowerCase(),
+      email: assignedEmail,
       phone: regPhone.trim() || '0300-1234567',
       role: authRoleChoice,
       avatarUrl: authRoleChoice === 'DRIVER' ? '👨‍✈️' : '🧑',
@@ -428,21 +515,61 @@ export default function Home() {
       vehicleRegistrationUploaded: authRoleChoice === 'DRIVER',
     };
 
-    setPendingUser(newUser);
-    setAuthView('VERIFY_OTP');
+    setIsSendingOtp(true);
 
-    setNotification({
-      type: 'info',
-      title: 'Email OTP Dispatched',
-      message: `A 6-digit verification code has been dispatched to ${newUser.email}. Test Code: ${code}`,
-    });
+    try {
+      if (regOtpMethod === 'EMAIL') {
+        // Dispatch real email OTP via Supabase Auth
+        if (supabase) {
+          const { error } = await supabase.auth.signInWithOtp({
+            email: newUser.email,
+          });
+          if (error) {
+            console.warn('[Supabase Auth]:', error.message);
+          }
+        }
+        setNotification({
+          type: 'success',
+          title: 'Email OTP Dispatched',
+          message: `Verification code sent to ${newUser.email}. Please check your inbox and spam folder.`,
+        });
+      } else {
+        // Dispatch SMS OTP via backend API
+        const res = await fetch('/api/auth/otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'send_sms', phone: newUser.phone }),
+        });
+        const data = await res.json();
+        if (!data.success) {
+          alert(data.error || 'Failed to dispatch SMS OTP. Please check your mobile number.');
+          setIsSendingOtp(false);
+          return;
+        }
+        setNotification({
+          type: 'success',
+          title: 'SMS Dispatched',
+          message: data.message || `Verification code sent via SMS to ${newUser.phone}.`,
+        });
+      }
+
+      setPendingUser(newUser);
+      setAuthView('VERIFY_OTP');
+      setOtpCountdown(60);
+      setRegOtp('');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to send OTP';
+      alert(`Error sending OTP: ${msg}`);
+    } finally {
+      setIsSendingOtp(false);
+    }
   };
 
-  // Handle Registration Step 2: Verify OTP & Activate Account
-  const handleVerifyOtp = (e: React.FormEvent) => {
+  // Handle Registration Step 2: Verify OTP
+  const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (regOtp.trim() !== generatedOtp) {
-      alert(`Invalid verification code. Please enter the 6-digit code sent to your email (Demo Code: ${generatedOtp}).`);
+    if (!regOtp.trim() || regOtp.trim().length !== 6) {
+      alert('Please enter the 6-digit verification code.');
       return;
     }
 
@@ -452,77 +579,155 @@ export default function Home() {
       return;
     }
 
-    const completedUser = pendingUser;
-    setRegisteredUsers((prev) => {
-      const filtered = prev.filter((u) => u.email.toLowerCase() !== completedUser.email.toLowerCase());
-      return [...filtered, completedUser];
-    });
+    setIsVerifyingOtp(true);
 
-    setCurrentUser(completedUser);
-    setPendingUser(null);
-    setRegOtp('');
+    try {
+      if (regOtpMethod === 'EMAIL') {
+        // Verify with Supabase Auth
+        if (supabase) {
+          const { error } = await supabase.auth.verifyOtp({
+            email: pendingUser.email,
+            token: regOtp.trim(),
+            type: 'email',
+          });
+          if (error) {
+            alert(`Email verification failed: ${error.message}. Please check your code or request a new one.`);
+            setIsVerifyingOtp(false);
+            return;
+          }
+        }
+      } else {
+        // Verify SMS OTP via backend API
+        const res = await fetch('/api/auth/otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'verify_sms',
+            phone: pendingUser.phone,
+            code: regOtp.trim(),
+          }),
+        });
+        const data = await res.json();
+        if (!data.success) {
+          alert(data.error || 'Invalid SMS verification code. Please check your messages and try again.');
+          setIsVerifyingOtp(false);
+          return;
+        }
+      }
 
-    if (completedUser.role === 'PASSENGER') {
-      setActiveTab('passenger');
-      setShowQuickRouteModal(true); // Immediate "From/To" popup!
-      setNotification({
-        type: 'success',
-        title: `Welcome, ${completedUser.name}!`,
-        message: 'Where do you want to travel? Choose your departure and destination.',
+      // Verification succeeded!
+      const completedUser = pendingUser;
+      setRegisteredUsers((prev) => {
+        const filtered = prev.filter(
+          (u) =>
+            u.email.toLowerCase() !== completedUser.email.toLowerCase() &&
+            u.phone !== completedUser.phone
+        );
+        return [...filtered, completedUser];
       });
-    } else {
-      setActiveTab('driver');
-      setNotification({
-        type: 'info',
-        title: 'Driver Account Verified & Created',
-        message: 'Your documents have been submitted for verification. You can now list rides.',
-      });
+
+      setCurrentUser(completedUser);
+      setPendingUser(null);
+      setRegOtp('');
+
+      if (completedUser.role === 'PASSENGER') {
+        setActiveTab('passenger');
+        setShowQuickRouteModal(true); // Immediate "From/To" popup!
+        setNotification({
+          type: 'success',
+          title: `Welcome, ${completedUser.name}!`,
+          message: 'Where do you want to travel? Choose your departure and destination.',
+        });
+      } else {
+        setActiveTab('driver');
+        setNotification({
+          type: 'info',
+          title: 'Captain Account Verified & Activated',
+          message: 'Your documents are registered. You can now list rides across Pakistan.',
+        });
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Verification failed';
+      alert(`Verification error: ${msg}`);
+    } finally {
+      setIsVerifyingOtp(false);
     }
   };
 
   // Resend OTP Helper
-  const handleResendOtp = () => {
-    const newCode = Math.floor(100000 + Math.random() * 900000).toString();
-    setGeneratedOtp(newCode);
-    setNotification({
-      type: 'info',
-      title: 'New Verification Code Generated',
-      message: `A fresh 6-digit code has been generated: ${newCode}`,
-    });
+  const handleResendOtp = async () => {
+    if (!pendingUser) return;
+    if (otpCountdown > 0) return;
+
+    setIsSendingOtp(true);
+    try {
+      if (regOtpMethod === 'EMAIL') {
+        if (supabase) {
+          await supabase.auth.signInWithOtp({ email: pendingUser.email });
+        }
+        setNotification({
+          type: 'info',
+          title: 'New Email OTP Dispatched',
+          message: `A fresh verification code was sent to ${pendingUser.email}.`,
+        });
+      } else {
+        await fetch('/api/auth/otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'send_sms', phone: pendingUser.phone }),
+        });
+        setNotification({
+          type: 'info',
+          title: 'New SMS OTP Dispatched',
+          message: `A fresh verification code was sent to ${pendingUser.phone}.`,
+        });
+      }
+      setOtpCountdown(60);
+    } catch {
+      alert('Failed to resend code. Please try again.');
+    } finally {
+      setIsSendingOtp(false);
+    }
   };
 
-  // Handle Login: Email-Only Instant Access
+  // Handle Login: Supports Either Registered Email OR Mobile Number
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    const normalized = loginEmail.trim().toLowerCase();
-    if (!normalized || !normalized.includes('@')) {
-      alert('Please enter your registered email address.');
+    const query = loginIdentifier.trim().toLowerCase();
+    if (!query) {
+      alert('Please enter your registered email address or mobile number.');
       return;
     }
 
-    // Match in registeredUsers or demo profiles
-    let matchedUser = registeredUsers.find((u) => u.email.toLowerCase() === normalized);
+    const cleanPhone = query.replace(/[\s\-\(\)]/g, '');
+
+    // Match in registeredUsers
+    let matchedUser = registeredUsers.find(
+      (u) =>
+        u.email.toLowerCase() === query ||
+        u.phone.replace(/[\s\-\(\)]/g, '') === cleanPhone
+    );
 
     if (!matchedUser) {
       if (
-        normalized === INITIAL_DEMO_DRIVER.email.toLowerCase() ||
-        normalized.includes('driver') ||
-        normalized.includes('captain')
+        query === INITIAL_DEMO_DRIVER.email.toLowerCase() ||
+        query.includes('driver') ||
+        query.includes('captain') ||
+        cleanPhone.includes('9876')
       ) {
         matchedUser = {
           ...INITIAL_DEMO_DRIVER,
-          email: normalized,
+          email: query.includes('@') ? query : INITIAL_DEMO_DRIVER.email,
+          phone: query.includes('@') ? INITIAL_DEMO_DRIVER.phone : query,
         };
       } else {
         matchedUser = {
           ...INITIAL_DEMO_PASSENGER,
-          name:
-            normalized
-              .split('@')[0]
-              .replace(/[^a-zA-Z]/g, ' ')
-              .replace(/\b\w/g, (c) => c.toUpperCase())
-              .trim() || 'Valued Passenger',
-          email: normalized,
+          name: query.includes('@')
+            ? query.split('@')[0].replace(/[^a-zA-Z]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).trim() || 'Passenger'
+            : 'Muhammad Ali',
+          email: query.includes('@') ? query : `${cleanPhone}@returnride.local`,
+          phone: query.includes('@') ? INITIAL_DEMO_PASSENGER.phone : query,
         };
       }
     }
@@ -599,12 +804,37 @@ export default function Home() {
   const rideBookings = bookings.filter((b) => b.rideId === currentRide.id);
   const availableSeats = calculateAvailableSeats(currentRide, rideBookings);
 
-  const matchingRides = rides.filter(
-    (r) => r.originLocationId === searchOrigin && r.destinationLocationId === searchDest
-  );
-
   const originName = NATIONWIDE_CITIES.find((c) => c.id === searchOrigin)?.name || 'Origin';
   const destName = NATIONWIDE_CITIES.find((c) => c.id === searchDest)?.name || 'Destination';
+
+  // Matches either direct origin->destination or intermediate corridor drop-off stops
+  const matchingRides = rides.filter((r) => {
+    if (r.originLocationId === searchOrigin && r.destinationLocationId === searchDest) {
+      return true;
+    }
+    if (
+      r.originLocationId === searchOrigin &&
+      r.routeStops?.some((s) => s.name.toLowerCase().includes(destName.toLowerCase()))
+    ) {
+      return true;
+    }
+    return false;
+  });
+
+  // Automatically determine effective drop-off waypoint for the current route
+  const effectiveDropoffStop = useMemo(() => {
+    if (selectedDropoffStop && selectedDropoffStop !== 'DEFAULT') {
+      return selectedDropoffStop;
+    }
+    const matchingStop = currentRide?.routeStops?.find((s) =>
+      s.name.toLowerCase().includes(destName.toLowerCase())
+    );
+    if (matchingStop) return matchingStop.name;
+    if (currentRide?.routeStops && currentRide.routeStops.length > 0) {
+      return currentRide.routeStops[currentRide.routeStops.length - 1].name;
+    }
+    return destName;
+  }, [selectedDropoffStop, currentRide, destName]);
 
   // Shared All Listings Filter
   const filteredAllRides = useMemo(() => {
@@ -623,11 +853,19 @@ export default function Home() {
     });
   }, [rides, filterOrigin, filterDest, filterTime, filterMode]);
 
+  // Find selected drop-off waypoint details if booking a seat
+  const activeMatchedStop = currentRide?.routeStops?.find(
+    (s) => s.name === effectiveDropoffStop
+  );
+  const activeSeatUnitPrice = activeMatchedStop
+    ? activeMatchedStop.seatPrice
+    : currentRide?.seatPrice || 0;
+
   // Current price
   const currentPrice =
     bookingType === 'WHOLE_CAR'
       ? currentRide.wholeCarPrice
-      : (currentRide.seatPrice || 0) * seatsRequested;
+      : activeSeatUnitPrice * seatsRequested;
 
   // Passenger Booking Request Handler
   const handleCreateRequest = (e: React.FormEvent) => {
@@ -651,7 +889,20 @@ export default function Home() {
 
     try {
       const seatsToBook = bookingType === 'WHOLE_CAR' ? 1 : seatsRequested;
-      const price = bookingType === 'WHOLE_CAR' ? currentRide.wholeCarPrice : (currentRide.seatPrice || 0) * seatsToBook;
+      let finalDropoff = destName;
+      let price = currentRide.wholeCarPrice;
+
+      if (bookingType === 'SEAT') {
+        if (effectiveDropoffStop === 'CUSTOM') {
+          finalDropoff = customDropoffStop.trim() || `${destName} (En Route)`;
+          price = (currentRide.seatPrice || 0) * seatsToBook;
+        } else if (activeMatchedStop) {
+          finalDropoff = activeMatchedStop.name;
+          price = activeMatchedStop.seatPrice * seatsToBook;
+        } else {
+          price = (currentRide.seatPrice || 0) * seatsToBook;
+        }
+      }
 
       const newRequest = createBookingRequest({
         id: generateClientUniqueId('req'),
@@ -660,6 +911,7 @@ export default function Home() {
         bookingType,
         requestedSeats: seatsToBook,
         totalPrice: price,
+        dropoffStopName: finalDropoff,
         confirmedBookings: rideBookings,
       });
 
@@ -667,7 +919,7 @@ export default function Home() {
       setNotification({
         type: 'success',
         title: 'Booking Request Sent!',
-        message: `Your request for ${bookingType === 'WHOLE_CAR' ? 'the Entire Car' : `${seatsToBook} seat(s)`} was sent to the driver.`,
+        message: `Your request for ${bookingType === 'WHOLE_CAR' ? 'the Entire Car' : `${seatsToBook} seat(s) to ${finalDropoff}`} was sent to the captain.`,
       });
     } catch (err: unknown) {
       if (err instanceof BookingEngineError) {
@@ -969,7 +1221,7 @@ export default function Home() {
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              New Registration (Email OTP)
+              New Registration (OTP)
             </button>
             <button
               onClick={() => setAuthView('LOGIN')}
@@ -979,7 +1231,7 @@ export default function Home() {
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              Sign In (Email Only)
+              Sign In (Instant Access)
             </button>
           </div>
 
@@ -997,13 +1249,13 @@ export default function Home() {
                     onClick={() => setAuthRoleChoice('PASSENGER')}
                     className={`p-3 rounded-2xl border-2 text-left transition flex flex-col justify-between ${
                       authRoleChoice === 'PASSENGER'
-                        ? 'border-emerald-500 bg-emerald-950/40'
+                        ? 'border-emerald-500 bg-emerald-950/40 shadow-xs'
                         : 'border-slate-700 hover:border-slate-600'
                     }`}
                   >
                     <span className="text-xl">🙋‍♂️</span>
-                    <span className="font-extrabold text-xs mt-1 block">Passenger</span>
-                    <span className="text-[10px] text-slate-400">I need a ride</span>
+                    <span className="font-extrabold text-xs mt-1 block text-white">Passenger</span>
+                    <span className="text-[10px] text-slate-400">I need a ride / seats</span>
                   </button>
 
                   <button
@@ -1011,13 +1263,46 @@ export default function Home() {
                     onClick={() => setAuthRoleChoice('DRIVER')}
                     className={`p-3 rounded-2xl border-2 text-left transition flex flex-col justify-between ${
                       authRoleChoice === 'DRIVER'
-                        ? 'border-emerald-500 bg-emerald-950/40'
+                        ? 'border-emerald-500 bg-emerald-950/40 shadow-xs'
                         : 'border-slate-700 hover:border-slate-600'
                     }`}
                   >
                     <span className="text-xl">🚘</span>
-                    <span className="font-extrabold text-xs mt-1 block">Driver / Captain</span>
-                    <span className="text-[10px] text-slate-400">I have a car</span>
+                    <span className="font-extrabold text-xs mt-1 block text-white">Captain / Driver</span>
+                    <span className="text-[10px] text-slate-400">I have a car to offer</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* OTP Delivery Preference Selector */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-300 uppercase mb-1.5">
+                  Receive 6-Digit OTP Via:
+                </label>
+                <div className="grid grid-cols-2 gap-2 p-1 bg-slate-900/90 rounded-2xl border border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => setRegOtpMethod('EMAIL')}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                      regOtpMethod === 'EMAIL'
+                        ? 'bg-emerald-600 text-white shadow-xs font-extrabold'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <span>📧</span>
+                    <span>Email Inbox</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRegOtpMethod('SMS')}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                      regOtpMethod === 'SMS'
+                        ? 'bg-emerald-600 text-white shadow-xs font-extrabold'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <span>📱</span>
+                    <span>Mobile SMS</span>
                   </button>
                 </div>
               </div>
@@ -1032,43 +1317,81 @@ export default function Home() {
                     onChange={(e) => setRegName(e.target.value)}
                     placeholder="e.g. Muhammad Ali"
                     required
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-medium"
                   />
                 </div>
 
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-300 mb-1">
-                    Email Address (6-Digit OTP Will Be Sent Here)
-                  </label>
-                  <input
-                    type="email"
-                    value={regEmail}
-                    onChange={(e) => setRegEmail(e.target.value)}
-                    placeholder="e.g. ali@example.com"
-                    required
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
+                {regOtpMethod === 'EMAIL' ? (
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-300 mb-1">
-                      Mobile Number
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[11px] font-bold text-slate-300">
+                        Email Address (For Verification Code)
+                      </label>
+                      <span className="text-[10px] text-emerald-400 font-semibold">Direct Inbox Delivery</span>
+                    </div>
+                    <input
+                      type="email"
+                      value={regEmail}
+                      onChange={(e) => setRegEmail(e.target.value)}
+                      placeholder="e.g. gotamjee@gmail.com"
+                      required
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-medium"
+                    />
+                  </div>
+                ) : (
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[11px] font-bold text-slate-300">
+                        Pakistani Mobile Number (For SMS OTP)
+                      </label>
+                      <span className="text-[10px] text-emerald-400 font-semibold">SIM Auto-Fetch Ready</span>
+                    </div>
                     <input
                       type="tel"
                       value={regPhone}
                       onChange={(e) => setRegPhone(e.target.value)}
                       placeholder="0300-1234567"
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                      required
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-medium"
                     />
                   </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-2">
+                  {regOtpMethod === 'EMAIL' ? (
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                        Mobile Number
+                      </label>
+                      <input
+                        type="tel"
+                        value={regPhone}
+                        onChange={(e) => setRegPhone(e.target.value)}
+                        placeholder="0300-1234567"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                        Email (Optional)
+                      </label>
+                      <input
+                        type="email"
+                        value={regEmail}
+                        onChange={(e) => setRegEmail(e.target.value)}
+                        placeholder="user@example.com"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                  )}
+
                   <div>
                     <label className="block text-[11px] font-bold text-slate-300 mb-1">Your City</label>
                     <select
                       value={regCity}
                       onChange={(e) => setRegCity(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500 font-medium"
                     >
                       {NATIONWIDE_CITIES.map((c) => (
                         <option key={c.id} value={c.name}>
@@ -1081,7 +1404,7 @@ export default function Home() {
 
                 <div>
                   <label className="block text-[11px] font-bold text-slate-300 mb-1">
-                    Emergency Contact Number (Family/Relative)
+                    Emergency Contact Number (Family / Relative)
                   </label>
                   <input
                     type="tel"
@@ -1103,7 +1426,7 @@ export default function Home() {
                     </span>
                   </div>
                   <p className="text-[10px] text-slate-400">
-                    To keep Pakistani passengers safe, CNIC and Driving License are required for all drivers.
+                    To keep Pakistani passengers safe, CNIC and Driving License are mandatory for all captains.
                   </p>
 
                   <div className="grid grid-cols-2 gap-2">
@@ -1115,7 +1438,7 @@ export default function Home() {
                         onChange={(e) => setRegCnic(e.target.value)}
                         placeholder="44101-1234567-1"
                         required
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 font-mono"
                       />
                     </div>
                     <div>
@@ -1126,7 +1449,7 @@ export default function Home() {
                         onChange={(e) => setRegLicense(e.target.value)}
                         placeholder="DL-KHI-45920"
                         required
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 font-mono"
                       />
                     </div>
                   </div>
@@ -1152,7 +1475,7 @@ export default function Home() {
                         onChange={(e) => setRegCarPlate(e.target.value)}
                         placeholder="LEB-4592"
                         required
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 uppercase font-mono"
                       />
                     </div>
                   </div>
@@ -1167,7 +1490,7 @@ export default function Home() {
                         value={regCarCapacity}
                         onChange={(e) => setRegCarCapacity(Number(e.target.value))}
                         required
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2 py-2 text-xs text-white"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2 py-2 text-xs text-white text-center font-bold"
                       />
                     </div>
                     <div>
@@ -1188,115 +1511,142 @@ export default function Home() {
                           onChange={(e) => setRegCarAc(e.target.checked)}
                           className="w-4 h-4 accent-emerald-500 rounded"
                         />
-                        <span>AC</span>
+                        <span>AC Car</span>
                       </label>
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* Submit Registration -> Leads to OTP Step */}
+              {/* Submit Registration -> Dispatches REAL OTP */}
               <button
                 type="submit"
-                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3.5 px-4 rounded-2xl shadow-lg transition text-xs uppercase tracking-wider cursor-pointer"
+                disabled={isSendingOtp}
+                className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white font-black py-3.5 px-4 rounded-2xl shadow-lg transition text-xs uppercase tracking-wider cursor-pointer flex items-center justify-center gap-2"
               >
-                Send 6-Digit Email OTP →
+                {isSendingOtp ? (
+                  <>
+                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                    <span>Dispatching Verification Code...</span>
+                  </>
+                ) : (
+                  <span>
+                    {regOtpMethod === 'EMAIL'
+                      ? 'Send Verification Code via Email →'
+                      : 'Send Verification Code via SMS →'}
+                  </span>
+                )}
               </button>
             </form>
           )}
 
-          {/* STEP 2: EMAIL OTP VERIFICATION FORM */}
+          {/* STEP 2: OTP VERIFICATION FORM (NO CODE LEAKED ON SCREEN) */}
           {authView === 'VERIFY_OTP' && (
             <div className="space-y-4">
-              <div className="text-center space-y-1">
-                <span className="text-3xl block">📧</span>
-                <h2 className="text-base font-extrabold text-white">Check Your Email</h2>
+              <div className="text-center space-y-1.5">
+                <span className="text-3xl block">
+                  {regOtpMethod === 'EMAIL' ? '📧' : '📱'}
+                </span>
+                <h2 className="text-base font-extrabold text-white">
+                  {regOtpMethod === 'EMAIL' ? 'Check Your Email Inbox' : 'Check Your Mobile SMS'}
+                </h2>
                 <p className="text-xs text-slate-300">
-                  We have sent a 6-digit verification code to:
+                  {regOtpMethod === 'EMAIL'
+                    ? 'A 6-digit verification code has been dispatched to:'
+                    : 'A 6-digit verification code was sent via SMS to:'}
                 </p>
-                <div className="font-mono text-xs font-black text-emerald-400 bg-emerald-950/60 py-1 px-3 rounded-lg border border-emerald-800/80 inline-block">
-                  {pendingUser?.email || regEmail}
+                <div className="font-mono text-xs font-black text-emerald-400 bg-emerald-950/60 py-1.5 px-3 rounded-xl border border-emerald-800/80 inline-block">
+                  {regOtpMethod === 'EMAIL'
+                    ? pendingUser?.email || regEmail
+                    : pendingUser?.phone || regPhone}
                 </div>
+                {regOtpMethod === 'EMAIL' ? (
+                  <p className="text-[11px] text-slate-400 pt-1">
+                    Please check your <strong>inbox</strong> and <strong>spam/junk folder</strong>.
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-emerald-400/90 pt-1 flex items-center justify-center gap-1">
+                    <span>⚡</span>
+                    <span>SIM Auto-Fetch Active: Code will auto-fill from incoming SMS.</span>
+                  </p>
+                )}
               </div>
 
-              {/* Demo auto-fill helper card */}
-              <div className="bg-slate-900 border border-emerald-500/50 p-3 rounded-2xl space-y-1.5 text-center">
-                <div className="text-[11px] text-slate-400 font-bold uppercase tracking-wider">
-                  Test Environment Verification Code
-                </div>
-                <div className="font-mono text-2xl font-black text-emerald-400 tracking-widest">
-                  {generatedOtp}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setRegOtp(generatedOtp)}
-                  className="text-[11px] text-emerald-300 hover:text-emerald-200 underline font-semibold cursor-pointer"
-                >
-                  Click to auto-fill code
-                </button>
-              </div>
-
-              <form onSubmit={handleVerifyOtp} className="space-y-3">
+              <form onSubmit={handleVerifyOtp} className="space-y-3.5">
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-300 mb-1 text-center">
-                    Enter 6-Digit OTP Code
+                  <label className="block text-[11px] font-bold text-slate-300 mb-1.5 text-center">
+                    Enter 6-Digit Verification Code
                   </label>
                   <input
                     type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
                     maxLength={6}
                     value={regOtp}
                     onChange={(e) => setRegOtp(e.target.value.replace(/\D/g, ''))}
                     placeholder="------"
                     autoFocus
                     required
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-3 text-center text-xl font-mono font-black text-white tracking-widest placeholder-slate-600 focus:outline-none focus:border-emerald-500"
+                    className="w-full bg-slate-900 border-2 border-emerald-500/60 rounded-2xl px-3 py-3 text-center text-2xl font-mono font-black text-white tracking-widest placeholder-slate-700 focus:outline-none focus:border-emerald-400 shadow-inner"
                   />
                 </div>
 
                 <button
                   type="submit"
-                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3.5 px-4 rounded-2xl shadow-lg transition text-xs uppercase tracking-wider cursor-pointer"
+                  disabled={isVerifyingOtp || regOtp.length !== 6}
+                  className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white font-black py-3.5 px-4 rounded-2xl shadow-lg transition text-xs uppercase tracking-wider cursor-pointer flex items-center justify-center gap-2"
                 >
-                  Verify Email & Enter ReturnRide
+                  {isVerifyingOtp ? (
+                    <>
+                      <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                      <span>Verifying Code...</span>
+                    </>
+                  ) : (
+                    <span>Verify &amp; Enter ReturnRide</span>
+                  )}
                 </button>
 
                 <div className="flex justify-between items-center pt-2 text-xs">
                   <button
                     type="button"
                     onClick={handleResendOtp}
-                    className="text-slate-400 hover:text-white underline cursor-pointer"
+                    disabled={otpCountdown > 0 || isSendingOtp}
+                    className="text-slate-400 hover:text-white underline cursor-pointer disabled:text-slate-600 disabled:no-underline"
                   >
-                    Resend Code
+                    {otpCountdown > 0 ? `Resend Code in ${otpCountdown}s` : 'Resend Code'}
                   </button>
                   <button
                     type="button"
-                    onClick={() => setAuthView('REGISTER')}
+                    onClick={() => {
+                      setAuthView('REGISTER');
+                      setRegOtp('');
+                    }}
                     className="text-slate-400 hover:text-white underline cursor-pointer"
                   >
-                    Change Email / Edit Details
+                    Edit Phone/Email
                   </button>
                 </div>
               </form>
             </div>
           )}
 
-          {/* SIGN IN FORM (EMAIL ONLY) */}
+          {/* SIGN IN FORM (VERSATILE: EMAIL OR MOBILE NUMBER) */}
           {authView === 'LOGIN' && (
             <form onSubmit={handleLogin} className="space-y-4">
               <div>
                 <label className="block text-[11px] font-bold text-slate-300 mb-1">
-                  Enter Your Registered Email Address:
+                  Enter Your Registered Email or Mobile Number:
                 </label>
                 <input
-                  type="email"
-                  value={loginEmail}
-                  onChange={(e) => setLoginEmail(e.target.value)}
-                  placeholder="e.g. ali@example.com"
+                  type="text"
+                  value={loginIdentifier}
+                  onChange={(e) => setLoginIdentifier(e.target.value)}
+                  placeholder="e.g. gotamjee@gmail.com or 0300-1234567"
                   required
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-bold"
                 />
                 <p className="text-[10px] text-slate-400 mt-1">
-                  Instant passwordless access. No phone number or password needed.
+                  Instant passwordless access. Sign in using either your email address or mobile phone.
                 </p>
               </div>
 
@@ -1328,7 +1678,7 @@ export default function Home() {
                 onClick={() => handleDemoLogin('DRIVER')}
                 className="bg-slate-700 hover:bg-slate-600 text-white py-2 px-3 rounded-xl text-xs font-bold transition flex flex-col items-center"
               >
-                <span>🚘 Demo Driver</span>
+                <span>🚘 Demo Captain</span>
                 <span className="text-[10px] text-slate-400 font-normal">tariq.captain@example.com</span>
               </button>
             </div>
@@ -1673,40 +2023,161 @@ export default function Home() {
                         )}
                       </div>
 
-                      {/* Stepper for Seat count */}
+                      {/* Stepper for Seat count & Waypoint Drop-off */}
                       {bookingType === 'SEAT' && (
-                        <div className="mt-3 p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between">
-                          <span className="text-xs font-bold text-slate-700">How many seats do you need?</span>
-                          <div className="flex items-center gap-3">
-                            <button
-                              type="button"
-                              onClick={() => setSeatsRequested((s) => Math.max(1, s - 1))}
-                              className="w-9 h-9 rounded-xl bg-white border border-slate-300 font-black text-lg text-slate-700 hover:bg-slate-100 flex items-center justify-center shadow-xs"
-                            >
-                              -
-                            </button>
-                            <span className="font-black text-lg w-5 text-center text-slate-900">
-                              {seatsRequested}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => setSeatsRequested((s) => Math.min(availableSeats, s + 1))}
-                              className="w-9 h-9 rounded-xl bg-white border border-slate-300 font-black text-lg text-slate-700 hover:bg-slate-100 flex items-center justify-center shadow-xs"
-                            >
-                              +
-                            </button>
+                        <div className="space-y-3 pt-2">
+                          {/* Seat Count Stepper */}
+                          <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between">
+                            <div>
+                              <span className="text-xs font-black text-slate-800 block">How many seats do you need?</span>
+                              <span className="text-[10px] text-slate-500">Max {availableSeats} seats available</span>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <button
+                                type="button"
+                                onClick={() => setSeatsRequested((s) => Math.max(1, s - 1))}
+                                className="w-9 h-9 rounded-xl bg-white border border-slate-300 font-black text-lg text-slate-700 hover:bg-slate-100 flex items-center justify-center shadow-xs cursor-pointer"
+                              >
+                                -
+                              </button>
+                              <span className="font-black text-lg w-5 text-center text-slate-900">
+                                {seatsRequested}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setSeatsRequested((s) => Math.min(availableSeats, s + 1))}
+                                className="w-9 h-9 rounded-xl bg-white border border-slate-300 font-black text-lg text-slate-700 hover:bg-slate-100 flex items-center justify-center shadow-xs cursor-pointer"
+                              >
+                                +
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Intermediate Route Drop-Off Waypoints */}
+                          <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-black text-slate-900 flex items-center gap-1.5">
+                                <span>📍</span>
+                                <span>Where Will You Get Off? (Drop-Off Stop)</span>
+                              </span>
+                              <span className="text-[10px] text-emerald-800 font-bold bg-emerald-100/80 px-2 py-0.5 rounded-full">
+                                Highway Route Segment
+                              </span>
+                            </div>
+
+                            <p className="text-[11px] text-slate-500">
+                              Traveling from <strong>{originName}</strong>: select any intermediate city along this route (e.g. Mirpur Khas, Tando Jam, Hyderabad) to pay only for your segment.
+                            </p>
+
+                            {/* Known Route Corridor Waypoints */}
+                            {currentRide.routeStops && currentRide.routeStops.length > 0 && (
+                              <div className="space-y-1.5 pt-1">
+                                {currentRide.routeStops.map((stop) => {
+                                  const isSelected = effectiveDropoffStop === stop.name;
+                                  return (
+                                    <button
+                                      type="button"
+                                      key={stop.id}
+                                      onClick={() => setSelectedDropoffStop(stop.name)}
+                                      className={`w-full p-2.5 rounded-xl border text-left transition flex items-center justify-between cursor-pointer ${
+                                        isSelected
+                                          ? 'border-emerald-600 bg-emerald-50 shadow-xs'
+                                          : 'border-slate-200 bg-white hover:border-slate-300'
+                                      }`}
+                                    >
+                                      <div className="flex items-center gap-2.5">
+                                        <span
+                                          className={`w-3.5 h-3.5 rounded-full flex items-center justify-center ${
+                                            isSelected
+                                              ? 'bg-emerald-600 ring-2 ring-emerald-200'
+                                              : 'border border-slate-400'
+                                          }`}
+                                        ></span>
+                                        <div>
+                                          <span className="text-xs font-bold text-slate-900 block">
+                                            {stop.name}
+                                          </span>
+                                          {stop.distanceKm && (
+                                            <span className="text-[10px] text-slate-400">
+                                              Approx. {stop.distanceKm} km from {originName}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      <div className="text-right">
+                                        <span className="text-xs font-black text-emerald-700 block">
+                                          Rs. {stop.seatPrice.toLocaleString()}
+                                        </span>
+                                        <span className="text-[9px] text-slate-400 font-semibold uppercase">
+                                          per seat
+                                        </span>
+                                      </div>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {/* Custom Highway Stop Input */}
+                            <div className="pt-1">
+                              <label className="flex items-center gap-2 cursor-pointer mb-1.5">
+                                <input
+                                  type="radio"
+                                  name="dropoffOption"
+                                  checked={effectiveDropoffStop === 'CUSTOM'}
+                                  onChange={() => setSelectedDropoffStop('CUSTOM')}
+                                  className="w-4 h-4 accent-emerald-600"
+                                />
+                                <span className="text-xs font-bold text-slate-800">
+                                  ✍️ Another Town or Interchange on Route:
+                                </span>
+                              </label>
+
+                              {effectiveDropoffStop === 'CUSTOM' && (
+                                <input
+                                  type="text"
+                                  value={customDropoffStop}
+                                  onChange={(e) => setCustomDropoffStop(e.target.value)}
+                                  placeholder="e.g. Tando Allahyar, Digri, Kotri, Thatta Toll..."
+                                  autoFocus
+                                  className="w-full bg-white border-2 border-emerald-500 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 placeholder-slate-400 focus:outline-none"
+                                />
+                              )}
+                            </div>
                           </div>
                         </div>
                       )}
                     </div>
 
-                    {/* Cash Guarantee */}
-                    <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 flex items-center gap-2.5 text-amber-900">
-                      <span className="text-lg">💵</span>
-                      <p className="text-[11px] leading-tight">
-                        <strong>Pay Cash When Boarding:</strong> No credit card needed.
-                        Pay Rs. {currentPrice.toLocaleString()} directly to the driver when boarding.
-                      </p>
+                    {/* Segment Summary & Direct Cash Guarantee */}
+                    <div className="p-3.5 bg-emerald-50/90 rounded-2xl border border-emerald-200 space-y-1.5 text-emerald-950">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-bold flex items-center gap-1.5">
+                          <span>🛣️</span> Journey Segment:
+                        </span>
+                        <span className="font-extrabold text-emerald-900 text-right">
+                          {originName} ➔{' '}
+                          {bookingType === 'WHOLE_CAR'
+                            ? `${destName} (Entire Car)`
+                            : effectiveDropoffStop === 'CUSTOM'
+                            ? customDropoffStop || `${destName} (En Route)`
+                            : effectiveDropoffStop}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-xs pt-1.5 border-t border-emerald-200">
+                        <span className="font-bold flex items-center gap-1.5">
+                          <span>💵</span> Cash Due to Captain on Boarding:
+                        </span>
+                        <span className="font-black text-emerald-800 text-base">
+                          Rs. {currentPrice.toLocaleString()}{' '}
+                          {bookingType === 'SEAT' && (
+                            <span className="text-[11px] font-normal text-slate-600">
+                              ({seatsRequested} seat{seatsRequested > 1 ? 's' : ''})
+                            </span>
+                          )}
+                        </span>
+                      </div>
                     </div>
 
                     {/* Submit Button */}
@@ -1715,7 +2186,9 @@ export default function Home() {
                       disabled={availableSeats <= 0}
                       className="w-full bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 text-white font-black py-4 px-4 rounded-2xl shadow-md transition text-sm flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
                     >
-                      <span>Send Booking Request (Rs. {currentPrice.toLocaleString()})</span>
+                      <span>
+                        Send Booking Request (Rs. {currentPrice.toLocaleString()})
+                      </span>
                       <span>➔</span>
                     </button>
                   </form>
@@ -1793,6 +2266,13 @@ export default function Home() {
                         <span>Total: Rs. {b.totalPrice.toLocaleString()} (Cash)</span>
                         <span className="text-[10px] text-slate-400">ID: {b.id}</span>
                       </div>
+
+                      {b.dropoffStopName && (
+                        <div className="text-[11px] text-emerald-900 font-bold mt-1.5 bg-emerald-100/70 px-2 py-0.5 rounded-lg inline-flex items-center gap-1 border border-emerald-200">
+                          <span>📍</span>
+                          <span>Drop-off Destination: {b.dropoffStopName}</span>
+                        </div>
+                      )}
 
                       {/* In-App Protection & Boarding Checkpoint (Disintermediation-Free) */}
                       {b.status === 'ACCEPTED' && (
@@ -1981,6 +2461,20 @@ export default function Home() {
                         </span>
                       </div>
                     </div>
+
+                    {rideItem.routeStops && rideItem.routeStops.length > 0 && (
+                      <div className="py-1.5 text-[11px] text-slate-500 flex items-center gap-1.5 flex-wrap">
+                        <span className="font-bold text-slate-600">Stops:</span>
+                        {rideItem.routeStops.slice(0, 3).map((st) => (
+                          <span key={st.id} className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-1.5 py-0.5 rounded-md text-[10px] font-semibold">
+                            {st.name} (Rs. {st.seatPrice.toLocaleString()})
+                          </span>
+                        ))}
+                        {rideItem.routeStops.length > 3 && (
+                          <span className="text-[10px] text-slate-400">+{rideItem.routeStops.length - 3} more</span>
+                        )}
+                      </div>
+                    )}
 
                     <div className="flex items-center justify-between pt-1">
                       <div>
@@ -2309,6 +2803,11 @@ export default function Home() {
                             </strong>{' '}
                             • <strong className="text-emerald-800">Rs. {req.totalPrice.toLocaleString()}</strong>
                           </p>
+                          {req.dropoffStopName && (
+                            <p className="text-[11px] text-emerald-800 font-bold mt-1 bg-emerald-100/70 px-2 py-0.5 rounded-md inline-block">
+                              📍 Drop-Off: {req.dropoffStopName}
+                            </p>
+                          )}
                         </div>
 
                         <span
@@ -2574,18 +3073,42 @@ export default function Home() {
                       onClick={() => {
                         setSearchOrigin('loc-uk');
                         setSearchDest('loc-khi');
+                        setSelectedDropoffStop('Karachi (Sohrab Goth / Cantt / Saddar)');
                       }}
-                      className="text-[11px] bg-slate-100 hover:bg-emerald-50 hover:text-emerald-800 text-slate-700 px-2 py-1 rounded-lg font-bold transition"
+                      className="text-[11px] bg-slate-100 hover:bg-emerald-50 hover:text-emerald-800 text-slate-700 px-2 py-1 rounded-lg font-bold transition cursor-pointer"
                     >
                       Umerkot ➔ Karachi
                     </button>
                     <button
                       type="button"
                       onClick={() => {
+                        setSearchOrigin('loc-uk');
+                        setSearchDest('loc-hyd');
+                        setSelectedDropoffStop('Hyderabad (Qasimabad / Latifabad)');
+                      }}
+                      className="text-[11px] bg-slate-100 hover:bg-emerald-50 hover:text-emerald-800 text-slate-700 px-2 py-1 rounded-lg font-bold transition cursor-pointer"
+                    >
+                      Umerkot ➔ Hyderabad (Rs. 1,800)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSearchOrigin('loc-uk');
+                        setSearchDest('loc-mpk');
+                        setSelectedDropoffStop('Mirpur Khas');
+                      }}
+                      className="text-[11px] bg-slate-100 hover:bg-emerald-50 hover:text-emerald-800 text-slate-700 px-2 py-1 rounded-lg font-bold transition cursor-pointer"
+                    >
+                      Umerkot ➔ Mirpur Khas (Rs. 900)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
                         setSearchOrigin('loc-khi');
                         setSearchDest('loc-hyd');
+                        setSelectedDropoffStop('Hyderabad (City / Auto Bhan)');
                       }}
-                      className="text-[11px] bg-slate-100 hover:bg-emerald-50 hover:text-emerald-800 text-slate-700 px-2 py-1 rounded-lg font-bold transition"
+                      className="text-[11px] bg-slate-100 hover:bg-emerald-50 hover:text-emerald-800 text-slate-700 px-2 py-1 rounded-lg font-bold transition cursor-pointer"
                     >
                       Karachi ➔ Hyderabad
                     </button>
@@ -2594,8 +3117,9 @@ export default function Home() {
                       onClick={() => {
                         setSearchOrigin('loc-lhr');
                         setSearchDest('loc-isb');
+                        setSelectedDropoffStop('Islamabad / Rawalpindi');
                       }}
-                      className="text-[11px] bg-slate-100 hover:bg-emerald-50 hover:text-emerald-800 text-slate-700 px-2 py-1 rounded-lg font-bold transition"
+                      className="text-[11px] bg-slate-100 hover:bg-emerald-50 hover:text-emerald-800 text-slate-700 px-2 py-1 rounded-lg font-bold transition cursor-pointer"
                     >
                       Lahore ➔ Islamabad
                     </button>

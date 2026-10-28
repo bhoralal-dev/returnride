@@ -221,6 +221,7 @@ export interface CreateBookingRequestParams {
   bookingType: BookingType;
   requestedSeats: number;
   totalPrice: number;
+  dropoffStopName?: string;
   confirmedBookings?: BookingRequest[];
   timestamp?: string;
 }
@@ -239,6 +240,7 @@ export function createBookingRequest(
     bookingType,
     requestedSeats,
     totalPrice,
+    dropoffStopName,
     confirmedBookings = [],
     timestamp = new Date().toISOString(),
   } = params;
@@ -314,6 +316,7 @@ export function createBookingRequest(
     bookingType,
     requestedSeats,
     totalPrice,
+    dropoffStopName,
     status: 'PENDING',
     createdAt: timestamp,
     updatedAt: timestamp,

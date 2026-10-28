@@ -21,6 +21,13 @@ export type RideStatus =
  */
 export type RideBookingMode = 'WHOLE_CAR' | 'SEATS' | 'WHOLE_CAR_OR_SEATS';
 
+export interface RouteStop {
+  id: string;
+  name: string;
+  distanceKm?: number;
+  seatPrice: number; // Segment seat fare from origin to this intermediate stop
+}
+
 export interface Ride {
   id: string;
   driverId: string;
@@ -36,6 +43,7 @@ export interface Ride {
   status: RideStatus;
   autoReopenOnCancellation?: boolean; // When true, cancelling an accepted booking restores seats/availability
   notes?: string;
+  routeStops?: RouteStop[]; // Intermediate drop-off waypoints along the highway corridor
   createdAt: string;
   updatedAt: string;
 }
