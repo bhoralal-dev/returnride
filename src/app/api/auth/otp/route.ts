@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import nodemailer from 'nodemailer';
+import crypto from 'crypto';
 
 interface StoredOtp {
   code: string;
@@ -7,8 +8,35 @@ interface StoredOtp {
   attempts: number;
 }
 
-// In-memory server cache for OTP tokens (10 minute expiry)
+// In-memory server cache for local development fallback
 const otpStore = new Map<string, StoredOtp>();
+
+// Serverless-safe HMAC Secret (immune to lambda cold-starts and multi-instance routing)
+const HMAC_SECRET =
+  process.env.SUPABASE_SECRET_KEY ||
+  process.env.GMAIL_APP_PASSWORD ||
+  'returnride-pakistan-secure-otp-secret-2026';
+
+function generateOtpToken(identifier: string, code: string, expiresAt: number): string {
+  const payload = `${identifier}:${code}:${expiresAt}`;
+  const signature = crypto.createHmac('sha256', HMAC_SECRET).update(payload).digest('hex');
+  return `${expiresAt}.${signature}`;
+}
+
+function verifyOtpToken(identifier: string, code: string, token: string): boolean {
+  try {
+    if (!token || !token.includes('.')) return false;
+    const [expiresAtStr, signature] = token.split('.');
+    const expiresAt = parseInt(expiresAtStr, 10);
+    if (isNaN(expiresAt) || Date.now() > expiresAt) return false;
+
+    const payload = `${identifier}:${code.trim()}:${expiresAt}`;
+    const expectedSignature = crypto.createHmac('sha256', HMAC_SECRET).update(payload).digest('hex');
+    return crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expectedSignature, 'hex'));
+  } catch {
+    return false;
+  }
+}
 
 function normalizePhone(phone: string): string {
   const clean = phone.replace(/[\s\-\(\)]/g, '');
@@ -72,7 +100,7 @@ function createEmailTransporter() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { action, phone, email, code } = body;
+    const { action, phone, email, code, token } = body;
 
     // =========================================================================
     // ACTION: SEND EMAIL OTP (Dispatched via user's configured Gmail/SMTP)
@@ -88,6 +116,9 @@ export async function POST(request: Request) {
       const normalized = normalizeEmail(email);
       const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
       const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+      // Generate serverless-safe cryptographic verification token
+      const otpToken = generateOtpToken(normalized, otpCode, expiresAt);
 
       otpStore.set(normalized, {
         code: otpCode,
@@ -145,19 +176,30 @@ export async function POST(request: Request) {
         console.warn(`[ReturnRide Email OTP] Generated code ${otpCode} for ${normalized}. SMTP credentials (GMAIL_USER / GMAIL_APP_PASSWORD) not yet configured in .env.local.`);
       }
 
-      return NextResponse.json({
+      const res = NextResponse.json({
         success: true,
         message: sentViaEmail
           ? `Verification code dispatched from your email to ${normalized}. Please check your inbox.`
           : `Verification code generated for ${normalized}. Configure GMAIL_USER & GMAIL_APP_PASSWORD in .env.local to send directly from your personal Gmail.`,
         emailDispatched: sentViaEmail,
         smtpConfigured: !!mailer,
+        token: otpToken,
         errorDetails: emailError,
       });
+
+      res.cookies.set('rr_otp_token', otpToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 600,
+        path: '/',
+      });
+
+      return res;
     }
 
     // =========================================================================
-    // ACTION: VERIFY EMAIL OTP
+    // ACTION: VERIFY EMAIL OTP (Stateless Cryptographic Verification)
     // =========================================================================
     if (action === 'verify_email') {
       if (!email || !code) {
@@ -168,46 +210,47 @@ export async function POST(request: Request) {
       }
 
       const normalized = normalizeEmail(email);
+      const cookieHeader = request.headers.get('cookie') || '';
+      const cookieToken = cookieHeader.match(/rr_otp_token=([^;]+)/)?.[1];
+      const activeToken = token || cookieToken;
+
+      // 1. Verify via Stateless Cryptographic Token (Guaranteed across all serverless lambdas)
+      if (activeToken && verifyOtpToken(normalized, code, activeToken)) {
+        otpStore.delete(normalized);
+        const res = NextResponse.json({
+          success: true,
+          message: 'Email address verified successfully.',
+        });
+        res.cookies.delete('rr_otp_token');
+        return res;
+      }
+
+      // 2. In-Memory fallback for same-lambda executions
       const record = otpStore.get(normalized);
+      if (record) {
+        if (Date.now() > record.expiresAt) {
+          otpStore.delete(normalized);
+          return NextResponse.json(
+            { success: false, error: 'Verification code has expired. Please request a fresh code.' },
+            { status: 400 }
+          );
+        }
 
-      if (!record) {
-        return NextResponse.json(
-          { success: false, error: 'No active verification code found for this email. Please request a new code.' },
-          { status: 400 }
-        );
+        if (record.code === code.trim()) {
+          otpStore.delete(normalized);
+          const res = NextResponse.json({
+            success: true,
+            message: 'Email address verified successfully.',
+          });
+          res.cookies.delete('rr_otp_token');
+          return res;
+        }
       }
 
-      if (Date.now() > record.expiresAt) {
-        otpStore.delete(normalized);
-        return NextResponse.json(
-          { success: false, error: 'Verification code has expired. Please request a fresh code.' },
-          { status: 400 }
-        );
-      }
-
-      record.attempts += 1;
-      if (record.attempts > 5) {
-        otpStore.delete(normalized);
-        return NextResponse.json(
-          { success: false, error: 'Too many incorrect attempts. Please request a new code.' },
-          { status: 429 }
-        );
-      }
-
-      if (record.code !== code.trim()) {
-        return NextResponse.json(
-          { success: false, error: 'Invalid verification code. Please check your email and try again.' },
-          { status: 400 }
-        );
-      }
-
-      // Invalidate code upon successful verification
-      otpStore.delete(normalized);
-
-      return NextResponse.json({
-        success: true,
-        message: 'Email address verified successfully.',
-      });
+      return NextResponse.json(
+        { success: false, error: 'Invalid verification code. Please check your email and try again.' },
+        { status: 400 }
+      );
     }
 
     // =========================================================================
@@ -232,6 +275,7 @@ export async function POST(request: Request) {
       // Generate 6-digit cryptographic OTP
       const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
       const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+      const otpToken = generateOtpToken(normalized, otpCode, expiresAt);
 
       otpStore.set(normalized, {
         code: otpCode,
@@ -295,15 +339,26 @@ export async function POST(request: Request) {
 
       console.log(`[ReturnRide SMS Dispatch] Destination: ${normalized} | Gateway: ${sentViaGateway ? 'ACTIVE' : 'READY'} | WebOTP: Active`);
 
-      return NextResponse.json({
+      const res = NextResponse.json({
         success: true,
         message: `Verification code dispatched via SMS to ${phone}. It will arrive in your mobile inbox shortly.`,
         carrierDispatched: sentViaGateway,
+        token: otpToken,
       });
+
+      res.cookies.set('rr_otp_token', otpToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 600,
+        path: '/',
+      });
+
+      return res;
     }
 
     // =========================================================================
-    // ACTION: VERIFY SMS OTP
+    // ACTION: VERIFY SMS OTP (Stateless Cryptographic Verification)
     // =========================================================================
     if (action === 'verify_sms') {
       if (!phone || !code) {
@@ -314,46 +369,47 @@ export async function POST(request: Request) {
       }
 
       const normalized = normalizePhone(phone);
+      const cookieHeader = request.headers.get('cookie') || '';
+      const cookieToken = cookieHeader.match(/rr_otp_token=([^;]+)/)?.[1];
+      const activeToken = token || cookieToken;
+
+      // 1. Verify via Stateless Cryptographic Token
+      if (activeToken && verifyOtpToken(normalized, code, activeToken)) {
+        otpStore.delete(normalized);
+        const res = NextResponse.json({
+          success: true,
+          message: 'Mobile number verified successfully.',
+        });
+        res.cookies.delete('rr_otp_token');
+        return res;
+      }
+
+      // 2. In-Memory fallback
       const record = otpStore.get(normalized);
+      if (record) {
+        if (Date.now() > record.expiresAt) {
+          otpStore.delete(normalized);
+          return NextResponse.json(
+            { success: false, error: 'Verification code has expired. Please request a new code.' },
+            { status: 400 }
+          );
+        }
 
-      if (!record) {
-        return NextResponse.json(
-          { success: false, error: 'No verification code found. Please request a new code.' },
-          { status: 400 }
-        );
+        if (record.code === code.trim()) {
+          otpStore.delete(normalized);
+          const res = NextResponse.json({
+            success: true,
+            message: 'Mobile number verified successfully.',
+          });
+          res.cookies.delete('rr_otp_token');
+          return res;
+        }
       }
 
-      if (Date.now() > record.expiresAt) {
-        otpStore.delete(normalized);
-        return NextResponse.json(
-          { success: false, error: 'Verification code has expired. Please request a new code.' },
-          { status: 400 }
-        );
-      }
-
-      record.attempts += 1;
-      if (record.attempts > 5) {
-        otpStore.delete(normalized);
-        return NextResponse.json(
-          { success: false, error: 'Too many incorrect attempts. Please request a new code.' },
-          { status: 429 }
-        );
-      }
-
-      if (record.code !== code.trim()) {
-        return NextResponse.json(
-          { success: false, error: 'Invalid verification code. Please check your SMS messages and try again.' },
-          { status: 400 }
-        );
-      }
-
-      // Verification successful - invalidate code
-      otpStore.delete(normalized);
-
-      return NextResponse.json({
-        success: true,
-        message: 'Mobile number verified successfully.',
-      });
+      return NextResponse.json(
+        { success: false, error: 'Invalid verification code. Please check your SMS messages and try again.' },
+        { status: 400 }
+      );
     }
 
     return NextResponse.json({ success: false, error: 'Unknown action specified.' }, { status: 400 });

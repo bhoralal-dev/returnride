@@ -284,6 +284,7 @@ export default function Home() {
 
   // OTP Verification state
   const [regOtp, setRegOtp] = useState('');
+  const [otpSessionToken, setOtpSessionToken] = useState('');
   const [pendingUser, setPendingUser] = useState<AppUserProfile | null>(null);
   const [isSendingOtp, setIsSendingOtp] = useState(false);
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
@@ -543,6 +544,10 @@ export default function Home() {
           return;
         }
 
+        if (data.token) {
+          setOtpSessionToken(data.token);
+        }
+
         setNotification({
           type: 'success',
           title: data.emailDispatched ? 'Email OTP Sent to Inbox' : 'Verification Code Prepared',
@@ -561,6 +566,11 @@ export default function Home() {
           setIsSendingOtp(false);
           return;
         }
+
+        if (data.token) {
+          setOtpSessionToken(data.token);
+        }
+
         setNotification({
           type: 'success',
           title: 'SMS Dispatched',
@@ -598,7 +608,7 @@ export default function Home() {
 
     try {
       if (regOtpMethod === 'EMAIL') {
-        // Verify with backend email OTP store
+        // Verify with backend email OTP store (passes cryptographic session token)
         const res = await fetch('/api/auth/otp', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -606,6 +616,7 @@ export default function Home() {
             action: 'verify_email',
             email: pendingUser.email,
             code: regOtp.trim(),
+            token: otpSessionToken,
           }),
         });
         const data = await res.json();
@@ -623,6 +634,7 @@ export default function Home() {
             action: 'verify_sms',
             phone: pendingUser.phone,
             code: regOtp.trim(),
+            token: otpSessionToken,
           }),
         });
         const data = await res.json();
@@ -686,6 +698,9 @@ export default function Home() {
           body: JSON.stringify({ action: 'send_email', email: pendingUser.email }),
         });
         const data = await res.json();
+        if (data.token) {
+          setOtpSessionToken(data.token);
+        }
         setNotification({
           type: 'info',
           title: 'Fresh Email OTP Dispatched',
@@ -698,6 +713,9 @@ export default function Home() {
           body: JSON.stringify({ action: 'send_sms', phone: pendingUser.phone }),
         });
         const data = await res.json();
+        if (data.token) {
+          setOtpSessionToken(data.token);
+        }
         setNotification({
           type: 'info',
           title: 'New SMS OTP Dispatched',
