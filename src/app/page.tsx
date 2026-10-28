@@ -22,7 +22,6 @@ import type {
   CancellationAppeal,
   EmergencyReasonCategory,
 } from '@/types/reliability';
-import { supabase } from '@/lib/supabase';
 import type {
   Ride,
   BookingRequest,
@@ -129,11 +128,11 @@ const INITIAL_RIDES: Ride[] = [
     autoReopenOnCancellation: true,
     notes: 'Toyota Corolla with AC. Trunk space for luggage. Departure from Umerkot center.',
     routeStops: [
-      { id: 'stop-mpk', name: 'Mirpur Khas', distanceKm: 75, seatPrice: 900 },
-      { id: 'stop-tj', name: 'Tando Jam', distanceKm: 120, seatPrice: 1400 },
-      { id: 'stop-hyd', name: 'Hyderabad (Qasimabad / Latifabad)', distanceKm: 145, seatPrice: 1800 },
-      { id: 'stop-nb', name: 'Nooriabad / M-9 Toll', distanceKm: 225, seatPrice: 2600 },
-      { id: 'stop-khi', name: 'Karachi (Sohrab Goth / Cantt / Saddar)', distanceKm: 320, seatPrice: 3500 },
+      { id: 'stop-mpk', name: 'Mirpur Khas', distanceKm: 75, seatPrice: 900, wholeCarPrice: 3500 },
+      { id: 'stop-tj', name: 'Tando Jam', distanceKm: 120, seatPrice: 1400, wholeCarPrice: 5500 },
+      { id: 'stop-hyd', name: 'Hyderabad (Qasimabad / Latifabad)', distanceKm: 145, seatPrice: 1800, wholeCarPrice: 7200 },
+      { id: 'stop-nb', name: 'Nooriabad / M-9 Toll', distanceKm: 225, seatPrice: 2600, wholeCarPrice: 10400 },
+      { id: 'stop-khi', name: 'Karachi (Sohrab Goth / Cantt / Saddar)', distanceKm: 320, seatPrice: 3500, wholeCarPrice: 14000 },
     ],
     createdAt: '2026-10-26T10:00:00Z',
     updatedAt: '2026-10-26T10:00:00Z',
@@ -154,8 +153,8 @@ const INITIAL_RIDES: Ride[] = [
     autoReopenOnCancellation: true,
     notes: 'Honda City AC. Departure from Sohrab Goth / Toll Plaza.',
     routeStops: [
-      { id: 'stop-nb', name: 'Nooriabad / Super Highway', distanceKm: 85, seatPrice: 900 },
-      { id: 'stop-hyd', name: 'Hyderabad (City / Auto Bhan)', distanceKm: 160, seatPrice: 1500 },
+      { id: 'stop-nb', name: 'Nooriabad / Super Highway', distanceKm: 85, seatPrice: 900, wholeCarPrice: 3500 },
+      { id: 'stop-hyd', name: 'Hyderabad (City / Auto Bhan)', distanceKm: 160, seatPrice: 1500, wholeCarPrice: 6000 },
     ],
     createdAt: '2026-10-26T11:00:00Z',
     updatedAt: '2026-10-26T11:00:00Z',
@@ -176,10 +175,10 @@ const INITIAL_RIDES: Ride[] = [
     autoReopenOnCancellation: true,
     notes: 'Direct Motorway M2 travel. Toyota Yaris with chilled AC.',
     routeStops: [
-      { id: 'stop-gwn', name: 'Gujranwala', distanceKm: 70, seatPrice: 1000 },
-      { id: 'stop-gjt', name: 'Gujrat', distanceKm: 120, seatPrice: 1600 },
-      { id: 'stop-jhl', name: 'Jhelum', distanceKm: 175, seatPrice: 2400 },
-      { id: 'stop-isb', name: 'Islamabad / Rawalpindi', distanceKm: 380, seatPrice: 4000 },
+      { id: 'stop-gwn', name: 'Gujranwala', distanceKm: 70, seatPrice: 1000, wholeCarPrice: 4000 },
+      { id: 'stop-gjt', name: 'Gujrat', distanceKm: 120, seatPrice: 1600, wholeCarPrice: 6400 },
+      { id: 'stop-jhl', name: 'Jhelum', distanceKm: 175, seatPrice: 2400, wholeCarPrice: 9600 },
+      { id: 'stop-isb', name: 'Islamabad / Rawalpindi', distanceKm: 380, seatPrice: 4000, wholeCarPrice: 16000 },
     ],
     createdAt: '2026-10-26T12:00:00Z',
     updatedAt: '2026-10-26T12:00:00Z',
@@ -200,9 +199,9 @@ const INITIAL_RIDES: Ride[] = [
     autoReopenOnCancellation: true,
     notes: 'Motorway M1 express journey. Suzuki Cultus.',
     routeStops: [
-      { id: 'stop-mrd', name: 'Mardan Interchange', distanceKm: 60, seatPrice: 1000 },
-      { id: 'stop-swb', name: 'Swabi', distanceKm: 105, seatPrice: 1600 },
-      { id: 'stop-isb', name: 'Islamabad (I-8 / Faizabad)', distanceKm: 180, seatPrice: 2500 },
+      { id: 'stop-mrd', name: 'Mardan Interchange', distanceKm: 60, seatPrice: 1000, wholeCarPrice: 3000 },
+      { id: 'stop-swb', name: 'Swabi', distanceKm: 105, seatPrice: 1600, wholeCarPrice: 4800 },
+      { id: 'stop-isb', name: 'Islamabad (I-8 / Faizabad)', distanceKm: 180, seatPrice: 2500, wholeCarPrice: 7500 },
     ],
     createdAt: '2026-10-26T13:00:00Z',
     updatedAt: '2026-10-26T13:00:00Z',
@@ -222,6 +221,12 @@ const INITIAL_RIDES: Ride[] = [
     status: 'PUBLISHED',
     autoReopenOnCancellation: true,
     notes: 'Honda Civic. Comfortable motorway ride from Multan.',
+    routeStops: [
+      { id: 'stop-khw', name: 'Khanewal', distanceKm: 50, seatPrice: 800, wholeCarPrice: 3200 },
+      { id: 'stop-shw', name: 'Sahiwal', distanceKm: 170, seatPrice: 1800, wholeCarPrice: 7200 },
+      { id: 'stop-okr', name: 'Okara', distanceKm: 220, seatPrice: 2400, wholeCarPrice: 9600 },
+      { id: 'stop-lhr', name: 'Lahore (Thokar Niaz Baig)', distanceKm: 340, seatPrice: 3500, wholeCarPrice: 14000 },
+    ],
     createdAt: '2026-10-26T14:00:00Z',
     updatedAt: '2026-10-26T14:00:00Z',
   },
@@ -240,6 +245,12 @@ const INITIAL_RIDES: Ride[] = [
     status: 'PUBLISHED',
     autoReopenOnCancellation: true,
     notes: 'Safe and smooth night travel via National Highway.',
+    routeStops: [
+      { id: 'stop-khp', name: 'Khairpur / Ranipur', distanceKm: 60, seatPrice: 900, wholeCarPrice: 3600 },
+      { id: 'stop-mro', name: 'Moro / Naushahro Feroze', distanceKm: 160, seatPrice: 1800, wholeCarPrice: 7200 },
+      { id: 'stop-hyd2', name: 'Hyderabad (Hala Toll)', distanceKm: 330, seatPrice: 3200, wholeCarPrice: 12800 },
+      { id: 'stop-khi2', name: 'Karachi (Toll Plaza / Sohrab Goth)', distanceKm: 480, seatPrice: 4500, wholeCarPrice: 18000 },
+    ],
     createdAt: '2026-10-26T15:00:00Z',
     updatedAt: '2026-10-26T15:00:00Z',
   },
@@ -519,19 +530,23 @@ export default function Home() {
 
     try {
       if (regOtpMethod === 'EMAIL') {
-        // Dispatch real email OTP via Supabase Auth
-        if (supabase) {
-          const { error } = await supabase.auth.signInWithOtp({
-            email: newUser.email,
-          });
-          if (error) {
-            console.warn('[Supabase Auth]:', error.message);
-          }
+        // Dispatch real email OTP via backend (personal Gmail / SMTP dispatcher)
+        const res = await fetch('/api/auth/otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'send_email', email: newUser.email }),
+        });
+        const data = await res.json();
+        if (!data.success) {
+          alert(data.error || 'Failed to dispatch email verification code.');
+          setIsSendingOtp(false);
+          return;
         }
+
         setNotification({
           type: 'success',
-          title: 'Email OTP Dispatched',
-          message: `Verification code sent to ${newUser.email}. Please check your inbox and spam folder.`,
+          title: data.emailDispatched ? 'Email OTP Sent to Inbox' : 'Verification Code Prepared',
+          message: data.message || `Verification code sent to ${newUser.email}. Please check your inbox and spam folder.`,
         });
       } else {
         // Dispatch SMS OTP via backend API
@@ -583,18 +598,21 @@ export default function Home() {
 
     try {
       if (regOtpMethod === 'EMAIL') {
-        // Verify with Supabase Auth
-        if (supabase) {
-          const { error } = await supabase.auth.verifyOtp({
+        // Verify with backend email OTP store
+        const res = await fetch('/api/auth/otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'verify_email',
             email: pendingUser.email,
-            token: regOtp.trim(),
-            type: 'email',
-          });
-          if (error) {
-            alert(`Email verification failed: ${error.message}. Please check your code or request a new one.`);
-            setIsVerifyingOtp(false);
-            return;
-          }
+            code: regOtp.trim(),
+          }),
+        });
+        const data = await res.json();
+        if (!data.success) {
+          alert(data.error || 'Invalid verification code. Please check your email and try again.');
+          setIsVerifyingOtp(false);
+          return;
         }
       } else {
         // Verify SMS OTP via backend API
@@ -662,24 +680,28 @@ export default function Home() {
     setIsSendingOtp(true);
     try {
       if (regOtpMethod === 'EMAIL') {
-        if (supabase) {
-          await supabase.auth.signInWithOtp({ email: pendingUser.email });
-        }
+        const res = await fetch('/api/auth/otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'send_email', email: pendingUser.email }),
+        });
+        const data = await res.json();
         setNotification({
           type: 'info',
-          title: 'New Email OTP Dispatched',
-          message: `A fresh verification code was sent to ${pendingUser.email}.`,
+          title: 'Fresh Email OTP Dispatched',
+          message: data.message || `A fresh verification code was sent to ${pendingUser.email}.`,
         });
       } else {
-        await fetch('/api/auth/otp', {
+        const res = await fetch('/api/auth/otp', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'send_sms', phone: pendingUser.phone }),
         });
+        const data = await res.json();
         setNotification({
           type: 'info',
           title: 'New SMS OTP Dispatched',
-          message: `A fresh verification code was sent to ${pendingUser.phone}.`,
+          message: data.message || `A fresh verification code was sent to ${pendingUser.phone}.`,
         });
       }
       setOtpCountdown(60);
@@ -853,7 +875,7 @@ export default function Home() {
     });
   }, [rides, filterOrigin, filterDest, filterTime, filterMode]);
 
-  // Find selected drop-off waypoint details if booking a seat
+  // Find selected drop-off waypoint details (works for BOTH Entire Car and Single Seats)
   const activeMatchedStop = currentRide?.routeStops?.find(
     (s) => s.name === effectiveDropoffStop
   );
@@ -861,10 +883,17 @@ export default function Home() {
     ? activeMatchedStop.seatPrice
     : currentRide?.seatPrice || 0;
 
-  // Current price
+  const activeWholeCarPrice = activeMatchedStop
+    ? (activeMatchedStop.wholeCarPrice ||
+       (currentRide?.seatPrice
+         ? Math.round((activeMatchedStop.seatPrice / currentRide.seatPrice) * currentRide.wholeCarPrice)
+         : currentRide.wholeCarPrice))
+    : currentRide.wholeCarPrice;
+
+  // Current price dynamically calculated for BOTH Entire Car and Single Seats
   const currentPrice =
     bookingType === 'WHOLE_CAR'
-      ? currentRide.wholeCarPrice
+      ? activeWholeCarPrice
       : activeSeatUnitPrice * seatsRequested;
 
   // Passenger Booking Request Handler
@@ -890,18 +919,22 @@ export default function Home() {
     try {
       const seatsToBook = bookingType === 'WHOLE_CAR' ? 1 : seatsRequested;
       let finalDropoff = destName;
-      let price = currentRide.wholeCarPrice;
+      let price = currentPrice;
 
-      if (bookingType === 'SEAT') {
-        if (effectiveDropoffStop === 'CUSTOM') {
-          finalDropoff = customDropoffStop.trim() || `${destName} (En Route)`;
-          price = (currentRide.seatPrice || 0) * seatsToBook;
-        } else if (activeMatchedStop) {
-          finalDropoff = activeMatchedStop.name;
-          price = activeMatchedStop.seatPrice * seatsToBook;
-        } else {
-          price = (currentRide.seatPrice || 0) * seatsToBook;
-        }
+      if (effectiveDropoffStop === 'CUSTOM') {
+        finalDropoff = customDropoffStop.trim() || `${destName} (En Route)`;
+        price = bookingType === 'WHOLE_CAR'
+          ? activeWholeCarPrice
+          : activeSeatUnitPrice * seatsToBook;
+      } else if (activeMatchedStop) {
+        finalDropoff = activeMatchedStop.name;
+        price = bookingType === 'WHOLE_CAR'
+          ? (activeMatchedStop.wholeCarPrice || activeWholeCarPrice)
+          : activeMatchedStop.seatPrice * seatsToBook;
+      } else {
+        price = bookingType === 'WHOLE_CAR'
+          ? currentRide.wholeCarPrice
+          : (currentRide.seatPrice || 0) * seatsToBook;
       }
 
       const newRequest = createBookingRequest({
@@ -1561,9 +1594,14 @@ export default function Home() {
                     : pendingUser?.phone || regPhone}
                 </div>
                 {regOtpMethod === 'EMAIL' ? (
-                  <p className="text-[11px] text-slate-400 pt-1">
-                    Please check your <strong>inbox</strong> and <strong>spam/junk folder</strong>.
-                  </p>
+                  <div className="space-y-1 pt-1">
+                    <p className="text-[11px] text-slate-300">
+                      Please check your <strong>Inbox</strong> and <strong>Spam/Junk</strong> folder.
+                    </p>
+                    <p className="text-[10px] text-emerald-400/80">
+                      💡 Tip: For 100% direct Gmail inbox delivery, configure your Google App Password in <code>.env.local</code>.
+                    </p>
+                  </div>
                 ) : (
                   <p className="text-[11px] text-emerald-400/90 pt-1 flex items-center justify-center gap-1">
                     <span>⚡</span>
@@ -1977,7 +2015,7 @@ export default function Home() {
 
                             <div className="text-right">
                               <span className="block text-sm font-black text-emerald-800">
-                                Rs. {currentRide.wholeCarPrice.toLocaleString()}
+                                Rs. {activeWholeCarPrice.toLocaleString()}
                               </span>
                               <span className="text-[10px] text-slate-500 font-semibold">Total Price</span>
                             </div>
@@ -2015,7 +2053,7 @@ export default function Home() {
 
                             <div className="text-right">
                               <span className="block text-sm font-black text-emerald-800">
-                                Rs. {currentRide.seatPrice?.toLocaleString()}
+                                Rs. {activeSeatUnitPrice.toLocaleString()}
                               </span>
                               <span className="text-[10px] text-slate-500 font-semibold">Per Seat</span>
                             </div>
@@ -2023,10 +2061,9 @@ export default function Home() {
                         )}
                       </div>
 
-                      {/* Stepper for Seat count & Waypoint Drop-off */}
+                      {/* Seat Count Stepper (Only for Seat Bookings) */}
                       {bookingType === 'SEAT' && (
-                        <div className="space-y-3 pt-2">
-                          {/* Seat Count Stepper */}
+                        <div className="pt-2">
                           <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between">
                             <div>
                               <span className="text-xs font-black text-slate-800 block">How many seats do you need?</span>
@@ -2052,102 +2089,118 @@ export default function Home() {
                               </button>
                             </div>
                           </div>
+                        </div>
+                      )}
 
-                          {/* Intermediate Route Drop-Off Waypoints */}
-                          <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2.5">
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs font-black text-slate-900 flex items-center gap-1.5">
-                                <span>📍</span>
-                                <span>Where Will You Get Off? (Drop-Off Stop)</span>
-                              </span>
-                              <span className="text-[10px] text-emerald-800 font-bold bg-emerald-100/80 px-2 py-0.5 rounded-full">
-                                Highway Route Segment
-                              </span>
-                            </div>
+                      {/* Clickable Intermediate Route Drop-Off Cities (FOR BOTH FULL CAR AND SEATS) */}
+                      <div className="pt-3">
+                        <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-black text-slate-900 flex items-center gap-1.5">
+                              <span>📍</span>
+                              <span>Drop-Off City (Between {originName} and {destName}):</span>
+                            </span>
+                            <span className="text-[10px] text-emerald-800 font-bold bg-emerald-100/90 px-2 py-0.5 rounded-full">
+                              Click City to Apply Lower Fare
+                            </span>
+                          </div>
 
-                            <p className="text-[11px] text-slate-500">
-                              Traveling from <strong>{originName}</strong>: select any intermediate city along this route (e.g. Mirpur Khas, Tando Jam, Hyderabad) to pay only for your segment.
-                            </p>
+                          <p className="text-[11px] text-slate-500 leading-normal">
+                            Getting off before {destName}? <strong>Click any city along the corridor</strong>. The price adjusts proportionally for <strong>both Entire Car and Single Seats</strong>:
+                          </p>
 
-                            {/* Known Route Corridor Waypoints */}
-                            {currentRide.routeStops && currentRide.routeStops.length > 0 && (
-                              <div className="space-y-1.5 pt-1">
-                                {currentRide.routeStops.map((stop) => {
-                                  const isSelected = effectiveDropoffStop === stop.name;
-                                  return (
-                                    <button
-                                      type="button"
-                                      key={stop.id}
-                                      onClick={() => setSelectedDropoffStop(stop.name)}
-                                      className={`w-full p-2.5 rounded-xl border text-left transition flex items-center justify-between cursor-pointer ${
-                                        isSelected
-                                          ? 'border-emerald-600 bg-emerald-50 shadow-xs'
-                                          : 'border-slate-200 bg-white hover:border-slate-300'
-                                      }`}
-                                    >
-                                      <div className="flex items-center gap-2.5">
+                          {/* Known Corridor Cities (Clickable Cards) */}
+                          {currentRide.routeStops && currentRide.routeStops.length > 0 && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                              {currentRide.routeStops.map((stop) => {
+                                const isSelected = effectiveDropoffStop === stop.name;
+                                const stopWholeCarPrice =
+                                  stop.wholeCarPrice ||
+                                  Math.round((stop.seatPrice / (currentRide.seatPrice || 1)) * currentRide.wholeCarPrice);
+                                const stopSeatPrice = stop.seatPrice;
+
+                                return (
+                                  <button
+                                    type="button"
+                                    key={stop.id}
+                                    onClick={() => setSelectedDropoffStop(stop.name)}
+                                    className={`p-3 rounded-xl border text-left transition flex flex-col justify-between cursor-pointer ${
+                                      isSelected
+                                        ? 'border-emerald-600 bg-emerald-50/90 shadow-xs ring-2 ring-emerald-500/20'
+                                        : 'border-slate-200 bg-white hover:border-emerald-300 hover:bg-slate-50/70'
+                                    }`}
+                                  >
+                                    <div className="flex items-start justify-between gap-1 mb-1.5">
+                                      <div className="flex items-center gap-1.5">
                                         <span
-                                          className={`w-3.5 h-3.5 rounded-full flex items-center justify-center ${
+                                          className={`w-3.5 h-3.5 rounded-full flex items-center justify-center shrink-0 ${
                                             isSelected
                                               ? 'bg-emerald-600 ring-2 ring-emerald-200'
                                               : 'border border-slate-400'
                                           }`}
-                                        ></span>
-                                        <div>
-                                          <span className="text-xs font-bold text-slate-900 block">
-                                            {stop.name}
-                                          </span>
-                                          {stop.distanceKm && (
-                                            <span className="text-[10px] text-slate-400">
-                                              Approx. {stop.distanceKm} km from {originName}
-                                            </span>
-                                          )}
-                                        </div>
-                                      </div>
-
-                                      <div className="text-right">
-                                        <span className="text-xs font-black text-emerald-700 block">
-                                          Rs. {stop.seatPrice.toLocaleString()}
+                                        >
+                                          {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-white"></span>}
                                         </span>
-                                        <span className="text-[9px] text-slate-400 font-semibold uppercase">
-                                          per seat
+                                        <span className="text-xs font-bold text-slate-900 leading-snug">
+                                          {stop.name}
                                         </span>
                                       </div>
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            )}
+                                      {stop.distanceKm && (
+                                        <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded shrink-0">
+                                          {stop.distanceKm} km
+                                        </span>
+                                      )}
+                                    </div>
 
-                            {/* Custom Highway Stop Input */}
-                            <div className="pt-1">
-                              <label className="flex items-center gap-2 cursor-pointer mb-1.5">
-                                <input
-                                  type="radio"
-                                  name="dropoffOption"
-                                  checked={effectiveDropoffStop === 'CUSTOM'}
-                                  onChange={() => setSelectedDropoffStop('CUSTOM')}
-                                  className="w-4 h-4 accent-emerald-600"
-                                />
-                                <span className="text-xs font-bold text-slate-800">
-                                  ✍️ Another Town or Interchange on Route:
-                                </span>
-                              </label>
+                                    <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-slate-100">
+                                      <span className="text-slate-500 text-[10px]">
+                                        {bookingType === 'WHOLE_CAR' ? 'Entire Car' : 'Per Seat'}:
+                                      </span>
+                                      <span className="font-black text-emerald-800">
+                                        Rs. {bookingType === 'WHOLE_CAR'
+                                          ? stopWholeCarPrice.toLocaleString()
+                                          : stopSeatPrice.toLocaleString()}
+                                      </span>
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
 
-                              {effectiveDropoffStop === 'CUSTOM' && (
+                          {/* Custom Highway Stop Input */}
+                          <div className="pt-2 border-t border-slate-200/80">
+                            <label className="flex items-center gap-2 cursor-pointer mb-1.5">
+                              <input
+                                type="radio"
+                                name="dropoffOption"
+                                checked={effectiveDropoffStop === 'CUSTOM'}
+                                onChange={() => setSelectedDropoffStop('CUSTOM')}
+                                className="w-4 h-4 accent-emerald-600"
+                              />
+                              <span className="text-xs font-bold text-slate-800">
+                                ✍️ Another Town or Interchange on Route:
+                              </span>
+                            </label>
+
+                            {effectiveDropoffStop === 'CUSTOM' && (
+                              <div className="space-y-1.5 pt-1">
                                 <input
                                   type="text"
                                   value={customDropoffStop}
                                   onChange={(e) => setCustomDropoffStop(e.target.value)}
-                                  placeholder="e.g. Tando Allahyar, Digri, Kotri, Thatta Toll..."
+                                  placeholder="e.g. Tando Allahyar, Digri, Jhudo, Kotri, Thatta Toll..."
                                   autoFocus
-                                  className="w-full bg-white border-2 border-emerald-500 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 placeholder-slate-400 focus:outline-none"
+                                  className="w-full bg-white border-2 border-emerald-500 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 placeholder-slate-400 focus:outline-none shadow-xs"
                                 />
-                              )}
-                            </div>
+                                <p className="text-[10px] text-slate-500">
+                                  Type your exact stop along the corridor so the captain knows where to drop you.
+                                </p>
+                              </div>
+                            )}
                           </div>
                         </div>
-                      )}
+                      </div>
                     </div>
 
                     {/* Segment Summary & Direct Cash Guarantee */}
@@ -2158,11 +2211,12 @@ export default function Home() {
                         </span>
                         <span className="font-extrabold text-emerald-900 text-right">
                           {originName} ➔{' '}
-                          {bookingType === 'WHOLE_CAR'
-                            ? `${destName} (Entire Car)`
-                            : effectiveDropoffStop === 'CUSTOM'
+                          {effectiveDropoffStop === 'CUSTOM'
                             ? customDropoffStop || `${destName} (En Route)`
-                            : effectiveDropoffStop}
+                            : effectiveDropoffStop}{' '}
+                          <span className="text-slate-600 font-semibold">
+                            ({bookingType === 'WHOLE_CAR' ? 'Entire Car' : `${seatsRequested} Seat(s)`})
+                          </span>
                         </span>
                       </div>
                       <div className="flex items-center justify-between text-xs pt-1.5 border-t border-emerald-200">
@@ -2173,7 +2227,7 @@ export default function Home() {
                           Rs. {currentPrice.toLocaleString()}{' '}
                           {bookingType === 'SEAT' && (
                             <span className="text-[11px] font-normal text-slate-600">
-                              ({seatsRequested} seat{seatsRequested > 1 ? 's' : ''})
+                              ({seatsRequested} seat{seatsRequested > 1 ? 's' : ''} @ Rs. {activeSeatUnitPrice.toLocaleString()})
                             </span>
                           )}
                         </span>

@@ -26,6 +26,7 @@ export interface RouteStop {
   name: string;
   distanceKm?: number;
   seatPrice: number; // Segment seat fare from origin to this intermediate stop
+  wholeCarPrice?: number; // Segment whole-car fare from origin to this intermediate stop
 }
 
 export interface Ride {
