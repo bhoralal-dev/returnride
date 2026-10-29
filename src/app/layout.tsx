@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ReturnRide - Nationwide Intercity Rides in Pakistan",
-  description: "Book affordable intercity car rides across Pakistan. Reserve a whole car or individual seats with cash payment.",
+  title: "Apni Sawari - Pakistan's Nationwide Intercity Ride Network",
+  description: "Apni Sawari (اپنی سواری) - Pakistan's trusted intercity travel network. Reserve whole cars, book individual seats, find Khali Wapsi deals, and post ride requests across Pakistan with direct cash payment.",
   manifest: "/manifest.json",
 };
 

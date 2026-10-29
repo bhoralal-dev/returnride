@@ -222,6 +222,9 @@ export interface CreateBookingRequestParams {
   requestedSeats: number;
   totalPrice: number;
   dropoffStopName?: string;
+  isRoundTrip?: boolean;
+  returnDepartureTime?: string;
+  roundTripType?: 'SAME_DAY_WAIT' | 'MULTI_DAY';
   confirmedBookings?: BookingRequest[];
   timestamp?: string;
 }
@@ -317,6 +320,9 @@ export function createBookingRequest(
     requestedSeats,
     totalPrice,
     dropoffStopName,
+    isRoundTrip: params.isRoundTrip,
+    returnDepartureTime: params.returnDepartureTime,
+    roundTripType: params.roundTripType,
     status: 'PENDING',
     createdAt: timestamp,
     updatedAt: timestamp,

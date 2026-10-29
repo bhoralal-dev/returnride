@@ -29,6 +29,18 @@ export interface RouteStop {
   wholeCarPrice?: number; // Segment whole-car fare from origin to this intermediate stop
 }
 
+export type DriverBadgeTier = 'NEW_DRIVER' | 'EXPERIENCED_DRIVER' | 'TOP_RATED_DRIVER';
+
+export interface TravelComfortAttributes {
+  acType?: 'CHILLED_AC' | 'NORMAL_AC';
+  maxInBack?: number; // 2 or 3
+  luggageCapacity?: 'CABIN_ONLY' | 'MEDIUM_SUITCASE' | 'FULL_TRUNK';
+  namazBreak?: boolean; // 15-min highway prayer/tea rest stop
+  tollsIncluded?: boolean; // Motorway / Super Highway Toll charges included
+  familyOnboard?: boolean; // Driver is traveling with own family (High trust)
+  ladiesOnlySeats?: boolean; // Reserved specifically for female passengers
+}
+
 export interface Ride {
   id: string;
   driverId: string;
@@ -45,6 +57,11 @@ export interface Ride {
   autoReopenOnCancellation?: boolean; // When true, cancelling an accepted booking restores seats/availability
   notes?: string;
   routeStops?: RouteStop[]; // Intermediate drop-off waypoints along the highway corridor
+  isReturnDeal?: boolean; // Special "Khali Wapsi" discount badge
+  travelComfort?: TravelComfortAttributes;
+  driverTier?: DriverBadgeTier;
+  roundTripAllowed?: boolean;
+  roundTripWholeCarPrice?: number; // Discounted round-trip full car rate
   createdAt: string;
   updatedAt: string;
 }

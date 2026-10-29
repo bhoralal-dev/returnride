@@ -21,6 +21,9 @@ export interface BookingRequest {
   requestedSeats: number; // 1 for WHOLE_CAR (representing the car), or 1..N for SEAT
   totalPrice: number;
   dropoffStopName?: string; // Passenger's selected destination / intermediate drop-off stop
+  isRoundTrip?: boolean; // When booking whole car round-trip with same driver
+  returnDepartureTime?: string;
+  roundTripType?: 'SAME_DAY_WAIT' | 'MULTI_DAY';
   status: BookingStatus;
   rejectionReason?: string;
   cancellationReason?: string;

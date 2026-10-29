@@ -27,6 +27,10 @@ import type {
   BookingRequest,
   BookingType,
   RideBookingMode,
+  PassengerRideRequest,
+  DriverOffer,
+  DriverBadgeTier,
+  TravelComfortAttributes,
 } from '@/types';
 
 interface City {
@@ -126,7 +130,18 @@ const INITIAL_RIDES: Ride[] = [
     seatPrice: 3500,
     status: 'PUBLISHED',
     autoReopenOnCancellation: true,
-    notes: 'Toyota Corolla with AC. Trunk space for luggage. Departure from Umerkot center.',
+    notes: 'Toyota Corolla with chilled AC. Clean trunk space for luggage. Departure from Umerkot center.',
+    driverTier: 'TOP_RATED_DRIVER',
+    roundTripAllowed: true,
+    roundTripWholeCarPrice: 23000, // Saves Rs. 5,000 for same-day or 2-day family return
+    travelComfort: {
+      acType: 'CHILLED_AC',
+      maxInBack: 2,
+      luggageCapacity: 'FULL_TRUNK',
+      namazBreak: true,
+      tollsIncluded: true,
+      familyOnboard: true,
+    },
     routeStops: [
       { id: 'stop-mpk', name: 'Mirpur Khas', distanceKm: 75, seatPrice: 900, wholeCarPrice: 3500 },
       { id: 'stop-tj', name: 'Tando Jam', distanceKm: 120, seatPrice: 1400, wholeCarPrice: 5500 },
@@ -152,6 +167,14 @@ const INITIAL_RIDES: Ride[] = [
     status: 'PUBLISHED',
     autoReopenOnCancellation: true,
     notes: 'Honda City AC. Departure from Sohrab Goth / Toll Plaza.',
+    driverTier: 'EXPERIENCED_DRIVER',
+    isReturnDeal: true, // Khali Wapsi special bargain!
+    travelComfort: {
+      acType: 'CHILLED_AC',
+      maxInBack: 2,
+      luggageCapacity: 'MEDIUM_SUITCASE',
+      tollsIncluded: true,
+    },
     routeStops: [
       { id: 'stop-nb', name: 'Nooriabad / Super Highway', distanceKm: 85, seatPrice: 900, wholeCarPrice: 3500 },
       { id: 'stop-hyd', name: 'Hyderabad (City / Auto Bhan)', distanceKm: 160, seatPrice: 1500, wholeCarPrice: 6000 },
@@ -174,6 +197,16 @@ const INITIAL_RIDES: Ride[] = [
     status: 'PUBLISHED',
     autoReopenOnCancellation: true,
     notes: 'Direct Motorway M2 travel. Toyota Yaris with chilled AC.',
+    driverTier: 'TOP_RATED_DRIVER',
+    roundTripAllowed: true,
+    roundTripWholeCarPrice: 26000,
+    travelComfort: {
+      acType: 'CHILLED_AC',
+      maxInBack: 2,
+      luggageCapacity: 'FULL_TRUNK',
+      namazBreak: true,
+      tollsIncluded: true,
+    },
     routeStops: [
       { id: 'stop-gwn', name: 'Gujranwala', distanceKm: 70, seatPrice: 1000, wholeCarPrice: 4000 },
       { id: 'stop-gjt', name: 'Gujrat', distanceKm: 120, seatPrice: 1600, wholeCarPrice: 6400 },
@@ -197,7 +230,14 @@ const INITIAL_RIDES: Ride[] = [
     seatPrice: 2500,
     status: 'PUBLISHED',
     autoReopenOnCancellation: true,
-    notes: 'Motorway M1 express journey. Suzuki Cultus.',
+    notes: 'Motorway M1 express journey. Suzuki Cultus with comfortable seating.',
+    driverTier: 'EXPERIENCED_DRIVER',
+    travelComfort: {
+      acType: 'NORMAL_AC',
+      maxInBack: 2,
+      ladiesOnlySeats: true, // Reserved for women passengers
+      luggageCapacity: 'CABIN_ONLY',
+    },
     routeStops: [
       { id: 'stop-mrd', name: 'Mardan Interchange', distanceKm: 60, seatPrice: 1000, wholeCarPrice: 3000 },
       { id: 'stop-swb', name: 'Swabi', distanceKm: 105, seatPrice: 1600, wholeCarPrice: 4800 },
@@ -221,6 +261,14 @@ const INITIAL_RIDES: Ride[] = [
     status: 'PUBLISHED',
     autoReopenOnCancellation: true,
     notes: 'Honda Civic. Comfortable motorway ride from Multan.',
+    driverTier: 'TOP_RATED_DRIVER',
+    travelComfort: {
+      acType: 'CHILLED_AC',
+      maxInBack: 2,
+      luggageCapacity: 'FULL_TRUNK',
+      namazBreak: true,
+      tollsIncluded: true,
+    },
     routeStops: [
       { id: 'stop-khw', name: 'Khanewal', distanceKm: 50, seatPrice: 800, wholeCarPrice: 3200 },
       { id: 'stop-shw', name: 'Sahiwal', distanceKm: 170, seatPrice: 1800, wholeCarPrice: 7200 },
@@ -245,6 +293,14 @@ const INITIAL_RIDES: Ride[] = [
     status: 'PUBLISHED',
     autoReopenOnCancellation: true,
     notes: 'Safe and smooth night travel via National Highway.',
+    driverTier: 'EXPERIENCED_DRIVER',
+    isReturnDeal: true, // Khali Wapsi special bargain!
+    travelComfort: {
+      acType: 'CHILLED_AC',
+      maxInBack: 3,
+      luggageCapacity: 'FULL_TRUNK',
+      namazBreak: true,
+    },
     routeStops: [
       { id: 'stop-khp', name: 'Khairpur / Ranipur', distanceKm: 60, seatPrice: 900, wholeCarPrice: 3600 },
       { id: 'stop-mro', name: 'Moro / Naushahro Feroze', distanceKm: 160, seatPrice: 1800, wholeCarPrice: 7200 },
@@ -253,6 +309,90 @@ const INITIAL_RIDES: Ride[] = [
     ],
     createdAt: '2026-10-26T15:00:00Z',
     updatedAt: '2026-10-26T15:00:00Z',
+  },
+];
+
+const INITIAL_PASSENGER_REQUESTS: PassengerRideRequest[] = [
+  {
+    id: 'req-sw-101',
+    passengerId: 'usr-ali',
+    passengerName: 'Muhammad Ali',
+    passengerPhone: '0301-2345678',
+    originLocationId: 'loc-mpk',
+    destinationLocationId: 'loc-khi',
+    originName: 'Mirpur Khas',
+    destinationName: 'Karachi',
+    travelDate: '2026-11-03',
+    desiredTime: '08:30 AM',
+    bookingType: 'WHOLE_CAR',
+    seatsCount: 4,
+    isFamilyTrip: true,
+    luggageSize: 'FULL_TRUNK',
+    acRequired: true,
+    budgetPrice: 13000,
+    isRoundTrip: false,
+    status: 'OPEN',
+    notes: 'Traveling with family (wife & 2 kids) for hospital appointment. Need polite driver & chilled AC.',
+    offers: [
+      {
+        id: 'off-1',
+        driverId: 'driver-tariq',
+        driverName: 'Tariq Khan',
+        driverPhone: '0300-9876543',
+        driverRating: 4.9,
+        driverTier: 'TOP_RATED_DRIVER',
+        vehicleMakeModel: 'Toyota Corolla GLi',
+        vehiclePlate: 'LEB-4592',
+        offeredPrice: 13000,
+        message: 'Family ride ready. Chilled AC, clean trunk space, doorstep pickup from Mirpur Khas.',
+        createdAt: '2026-10-28T09:00:00Z',
+      },
+    ],
+    createdAt: '2026-10-28T08:30:00Z',
+  },
+  {
+    id: 'req-sw-102',
+    passengerId: 'usr-fatima',
+    passengerName: 'Dr. Fatima Zahra',
+    passengerPhone: '0333-8877665',
+    originLocationId: 'loc-hyd',
+    destinationLocationId: 'loc-khi',
+    originName: 'Hyderabad',
+    destinationName: 'Karachi',
+    travelDate: '2026-11-02',
+    desiredTime: '10:00 AM',
+    bookingType: 'SEAT',
+    seatsCount: 2,
+    isFamilyTrip: true,
+    luggageSize: 'MEDIUM_SUITCASE',
+    acRequired: true,
+    budgetPrice: 3200,
+    status: 'OPEN',
+    notes: '2 female passengers. Prefer car with family or ladies-only back seats.',
+    offers: [],
+    createdAt: '2026-10-28T10:15:00Z',
+  },
+  {
+    id: 'req-sw-103',
+    passengerId: 'usr-bilal-p',
+    passengerName: 'Bilal Ahmed',
+    passengerPhone: '0321-4455667',
+    originLocationId: 'loc-uk',
+    destinationLocationId: 'loc-mpk',
+    originName: 'Umerkot',
+    destinationName: 'Mirpur Khas',
+    travelDate: '2026-11-02',
+    desiredTime: '07:00 AM',
+    bookingType: 'SEAT',
+    seatsCount: 1,
+    isFamilyTrip: false,
+    luggageSize: 'CABIN_ONLY',
+    acRequired: true,
+    budgetPrice: 900,
+    status: 'OPEN',
+    notes: 'University student commuting to Mirpur Khas campus. 1 small backpack.',
+    offers: [],
+    createdAt: '2026-10-28T11:00:00Z',
   },
 ];
 
@@ -301,8 +441,8 @@ export default function Home() {
   const [selectedDropoffStop, setSelectedDropoffStop] = useState<string>('DEFAULT');
   const [customDropoffStop, setCustomDropoffStop] = useState<string>('');
 
-  // App Tabs: 'passenger' | 'all_listings' | 'driver' | 'profile'
-  const [activeTab, setActiveTab] = useState<'passenger' | 'all_listings' | 'driver' | 'profile'>('passenger');
+  // App Tabs: 'passenger' | 'all_listings' | 'sawari_board' | 'driver' | 'profile'
+  const [activeTab, setActiveTab] = useState<'passenger' | 'all_listings' | 'sawari_board' | 'driver' | 'profile'>('passenger');
 
   // "Where To?" Quick Route Popup for Passengers
   const [showQuickRouteModal, setShowQuickRouteModal] = useState(false);
@@ -311,6 +451,41 @@ export default function Home() {
   const [rides, setRides] = useState<Ride[]>(INITIAL_RIDES);
   const [selectedRideId, setSelectedRideId] = useState<string>('ride-101');
   const [bookings, setBookings] = useState<BookingRequest[]>([]);
+
+  // Passenger Requests ("Sawari Board" Reverse Marketplace)
+  const [passengerRequests, setPassengerRequests] = useState<PassengerRideRequest[]>(INITIAL_PASSENGER_REQUESTS);
+  const [sawariFilterCity, setSawariFilterCity] = useState<string>('ALL');
+  const [sawariFilterType, setSawariFilterType] = useState<'ALL' | 'WHOLE_CAR' | 'SEAT'>('ALL');
+
+  // Modal: Post New Sawari Request
+  const [showPostRequestModal, setShowPostRequestModal] = useState(false);
+  const [reqOrigin, setReqOrigin] = useState<string>('loc-mpk');
+  const [reqDest, setReqDest] = useState<string>('loc-khi');
+  const [reqDate, setReqDate] = useState<string>('2026-11-03');
+  const [reqTime, setReqTime] = useState<string>('08:30 AM');
+  const [reqBookingType, setReqBookingType] = useState<'WHOLE_CAR' | 'SEAT'>('WHOLE_CAR');
+  const [reqSeatsCount, setReqSeatsCount] = useState<number>(4);
+  const [reqIsFamily, setReqIsFamily] = useState<boolean>(true);
+  const [reqLuggage, setReqLuggage] = useState<'CABIN_ONLY' | 'MEDIUM_SUITCASE' | 'FULL_TRUNK'>('FULL_TRUNK');
+  const [reqAc, setReqAc] = useState<boolean>(true);
+  const [reqBudget, setReqBudget] = useState<number>(13000);
+  const [reqNotes, setReqNotes] = useState<string>('');
+  const [reqIsRoundTrip, setReqIsRoundTrip] = useState<boolean>(false);
+  const [reqReturnDate, setReqReturnDate] = useState<string>('2026-11-04');
+
+  // Modal: Driver Send Custom Offer
+  const [selectedReqForOffer, setSelectedReqForOffer] = useState<PassengerRideRequest | null>(null);
+  const [offerPrice, setOfferPrice] = useState<number>(0);
+  const [offerMessage, setOfferMessage] = useState<string>('');
+
+  // Entire Car Round-Trip Booking Selection State
+  const [isWholeCarRoundTrip, setIsWholeCarRoundTrip] = useState<boolean>(false);
+  const [roundTripType, setRoundTripType] = useState<'SAME_DAY_WAIT' | 'MULTI_DAY'>('SAME_DAY_WAIT');
+  const [returnTripDate, setReturnTripDate] = useState<string>('2026-11-03');
+  const [returnTripTime, setReturnTripTime] = useState<string>('06:00 PM');
+
+  // Filter tag for All Rides tab
+  const [allRidesFilterTag, setAllRidesFilterTag] = useState<'ALL' | 'KHALI_WAPSI' | 'FAMILY' | 'MAX_2_BACK' | 'LADIES_ONLY'>('ALL');
 
   // Passenger Search State
   const [searchOrigin, setSearchOrigin] = useState<string>('loc-uk');
@@ -332,6 +507,15 @@ export default function Home() {
   const [driverPostSeatPrice, setDriverPostSeatPrice] = useState<number>(3500);
   const [driverPostTime, setDriverPostTime] = useState<string>('07:00 AM');
   const [driverPostNotes, setDriverPostNotes] = useState<string>('Clean AC car with luggage trunk.');
+  const [driverPostRoundTripAllowed, setDriverPostRoundTripAllowed] = useState<boolean>(true);
+  const [driverPostRoundTripPrice, setDriverPostRoundTripPrice] = useState<number>(23000);
+  const [driverPostFamilyOnboard, setDriverPostFamilyOnboard] = useState<boolean>(false);
+  const [driverPostLadiesOnly, setDriverPostLadiesOnly] = useState<boolean>(false);
+  const [driverPostNamazBreak, setDriverPostNamazBreak] = useState<boolean>(true);
+  const [driverPostTollsIncluded, setDriverPostTollsIncluded] = useState<boolean>(true);
+  const [driverPostMaxInBack, setDriverPostMaxInBack] = useState<number>(2);
+  const [driverPostLuggage, setDriverPostLuggage] = useState<'CABIN_ONLY' | 'MEDIUM_SUITCASE' | 'FULL_TRUNK'>('FULL_TRUNK');
+  const [driverPostIsReturnDeal, setDriverPostIsReturnDeal] = useState<boolean>(false);
 
   // Repeat Cancellation & Reliability State
   const [cancellationEvents, setCancellationEvents] = useState<CancellationEvent[]>([]);
@@ -348,8 +532,8 @@ export default function Home() {
     message: string;
   } | null>({
     type: 'info',
-    title: 'ReturnRide Pakistan',
-    message: 'Welcome to ReturnRide. Safe intercity ride sharing nationwide.',
+    title: 'Apni Sawari (اپنی سواری)',
+    message: 'Welcome to Apni Sawari - Pakistan’s Nationwide Intercity Ride Network.',
   });
 
   // Load state from localStorage on client mount (scheduled asynchronously to prevent sync effect re-renders)
@@ -361,6 +545,7 @@ export default function Home() {
       const savedBookings = localStorage.getItem('returnride_bookings');
       const savedEvents = localStorage.getItem('returnride_canc_events');
       const savedAppeals = localStorage.getItem('returnride_appeals');
+      const savedPassengerRequests = localStorage.getItem('apnisawari_passenger_requests');
 
       const timer = setTimeout(() => {
         if (savedUser) {
@@ -381,6 +566,13 @@ export default function Home() {
         if (savedBookings) setBookings(JSON.parse(savedBookings));
         if (savedEvents) setCancellationEvents(JSON.parse(savedEvents));
         if (savedAppeals) setAppeals(JSON.parse(savedAppeals));
+        if (savedPassengerRequests) {
+          try {
+            setPassengerRequests(JSON.parse(savedPassengerRequests));
+          } catch {
+            // Ignore
+          }
+        }
         setIsClientLoaded(true);
       }, 0);
 
@@ -405,10 +597,11 @@ export default function Home() {
       localStorage.setItem('returnride_bookings', JSON.stringify(bookings));
       localStorage.setItem('returnride_canc_events', JSON.stringify(cancellationEvents));
       localStorage.setItem('returnride_appeals', JSON.stringify(appeals));
+      localStorage.setItem('apnisawari_passenger_requests', JSON.stringify(passengerRequests));
     } catch {
       // Ignore
     }
-  }, [currentUser, registeredUsers, rides, bookings, cancellationEvents, appeals, isClientLoaded]);
+  }, [currentUser, registeredUsers, rides, bookings, cancellationEvents, appeals, passengerRequests, isClientLoaded]);
 
   // Current User Evaluated Reliability Profile
   const userReliability = useMemo(() => {
@@ -889,9 +1082,32 @@ export default function Home() {
         if (filterTime === 'AFTERNOON' && (hour < 12 || hour >= 18)) return false;
         if (filterTime === 'EVENING' && (hour < 18 && hour >= 5)) return false;
       }
+      // Cultural & Trust Filter Chips
+      if (allRidesFilterTag === 'KHALI_WAPSI' && !r.isReturnDeal) return false;
+      if (allRidesFilterTag === 'FAMILY' && !r.travelComfort?.familyOnboard) return false;
+      if (allRidesFilterTag === 'MAX_2_BACK' && r.travelComfort?.maxInBack !== 2) return false;
+      if (allRidesFilterTag === 'LADIES_ONLY' && !r.travelComfort?.ladiesOnlySeats) return false;
       return true;
     });
-  }, [rides, filterOrigin, filterDest, filterTime, filterMode]);
+  }, [rides, filterOrigin, filterDest, filterTime, filterMode, allRidesFilterTag]);
+
+  // Filtered Sawari Requests (Reverse Marketplace)
+  const filteredPassengerRequests = useMemo(() => {
+    return passengerRequests.filter((req) => {
+      if (sawariFilterType === 'WHOLE_CAR' && req.bookingType !== 'WHOLE_CAR') return false;
+      if (sawariFilterType === 'SEAT' && req.bookingType !== 'SEAT') return false;
+      if (sawariFilterCity !== 'ALL') {
+        const matchesOrigin =
+          req.originLocationId === sawariFilterCity ||
+          req.originName.toLowerCase().includes(sawariFilterCity.toLowerCase());
+        const matchesDest =
+          req.destinationLocationId === sawariFilterCity ||
+          req.destinationName.toLowerCase().includes(sawariFilterCity.toLowerCase());
+        if (!matchesOrigin && !matchesDest) return false;
+      }
+      return true;
+    });
+  }, [passengerRequests, sawariFilterCity, sawariFilterType]);
 
   // Find selected drop-off waypoint details (works for BOTH Entire Car and Single Seats)
   const activeMatchedStop = currentRide?.routeStops?.find(
@@ -908,10 +1124,12 @@ export default function Home() {
          : currentRide.wholeCarPrice))
     : currentRide.wholeCarPrice;
 
-  // Current price dynamically calculated for BOTH Entire Car and Single Seats
+  const roundTripWholePrice = currentRide.roundTripWholeCarPrice || Math.round(activeWholeCarPrice * 1.65);
+
+  // Current price dynamically calculated for BOTH Entire Car (One-Way or Round-Trip) and Single Seats
   const currentPrice =
     bookingType === 'WHOLE_CAR'
-      ? activeWholeCarPrice
+      ? (isWholeCarRoundTrip ? roundTripWholePrice : activeWholeCarPrice)
       : activeSeatUnitPrice * seatsRequested;
 
   // Passenger Booking Request Handler
@@ -942,27 +1160,30 @@ export default function Home() {
       if (effectiveDropoffStop === 'CUSTOM') {
         finalDropoff = customDropoffStop.trim() || `${destName} (En Route)`;
         price = bookingType === 'WHOLE_CAR'
-          ? activeWholeCarPrice
+          ? (isWholeCarRoundTrip ? roundTripWholePrice : activeWholeCarPrice)
           : activeSeatUnitPrice * seatsToBook;
       } else if (activeMatchedStop) {
         finalDropoff = activeMatchedStop.name;
         price = bookingType === 'WHOLE_CAR'
-          ? (activeMatchedStop.wholeCarPrice || activeWholeCarPrice)
+          ? (isWholeCarRoundTrip ? roundTripWholePrice : (activeMatchedStop.wholeCarPrice || activeWholeCarPrice))
           : activeMatchedStop.seatPrice * seatsToBook;
       } else {
         price = bookingType === 'WHOLE_CAR'
-          ? currentRide.wholeCarPrice
+          ? (isWholeCarRoundTrip ? roundTripWholePrice : currentRide.wholeCarPrice)
           : (currentRide.seatPrice || 0) * seatsToBook;
       }
 
       const newRequest = createBookingRequest({
         id: generateClientUniqueId('req'),
         ride: currentRide,
-        passengerId: `${currentUser.name} (Verified Passenger #${currentUser.id.slice(-4)})`,
+        passengerId: `${currentUser.name} (Verified Sawari #${currentUser.id.slice(-4)})`,
         bookingType,
         requestedSeats: seatsToBook,
         totalPrice: price,
         dropoffStopName: finalDropoff,
+        isRoundTrip: bookingType === 'WHOLE_CAR' ? isWholeCarRoundTrip : false,
+        roundTripType: bookingType === 'WHOLE_CAR' && isWholeCarRoundTrip ? roundTripType : undefined,
+        returnDepartureTime: bookingType === 'WHOLE_CAR' && isWholeCarRoundTrip ? `${returnTripDate}T${returnTripTime}` : undefined,
         confirmedBookings: rideBookings,
       });
 
@@ -970,13 +1191,124 @@ export default function Home() {
       setNotification({
         type: 'success',
         title: 'Booking Request Sent!',
-        message: `Your request for ${bookingType === 'WHOLE_CAR' ? 'the Entire Car' : `${seatsToBook} seat(s) to ${finalDropoff}`} was sent to the captain.`,
+        message: `Your request for ${bookingType === 'WHOLE_CAR' ? (isWholeCarRoundTrip ? 'Entire Car (Round-Trip)' : 'Entire Car (One-Way)') : `${seatsToBook} seat(s) to ${finalDropoff}`} was sent to the driver.`,
       });
     } catch (err: unknown) {
       if (err instanceof BookingEngineError) {
         setNotification({ type: 'error', title: 'Cannot Submit Request', message: err.message });
       }
     }
+  };
+
+  // Handle posting a new Sawari Request from Passenger
+  const handlePostSawariRequest = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser) return;
+
+    const oCity = NATIONWIDE_CITIES.find((c) => c.id === reqOrigin)?.name || 'Origin';
+    const dCity = NATIONWIDE_CITIES.find((c) => c.id === reqDest)?.name || 'Destination';
+
+    const newReq: PassengerRideRequest = {
+      id: generateClientUniqueId('req-sw'),
+      passengerId: currentUser.id,
+      passengerName: currentUser.name,
+      passengerPhone: currentUser.phone,
+      originLocationId: reqOrigin,
+      destinationLocationId: reqDest,
+      originName: oCity,
+      destinationName: dCity,
+      travelDate: reqDate,
+      desiredTime: reqTime,
+      bookingType: reqBookingType,
+      seatsCount: reqBookingType === 'WHOLE_CAR' ? 4 : reqSeatsCount,
+      isFamilyTrip: reqIsFamily,
+      luggageSize: reqLuggage,
+      acRequired: reqAc,
+      budgetPrice: Number(reqBudget),
+      isRoundTrip: reqIsRoundTrip,
+      returnDate: reqIsRoundTrip ? reqReturnDate : undefined,
+      status: 'OPEN',
+      notes: reqNotes.trim() || undefined,
+      offers: [],
+      createdAt: new Date().toISOString(),
+    };
+
+    setPassengerRequests((prev) => [newReq, ...prev]);
+    setShowPostRequestModal(false);
+    setActiveTab('sawari_board');
+    setNotification({
+      type: 'success',
+      title: 'Sawari Request Listed on Board!',
+      message: `Your request for ${oCity} ➔ ${dCity} is posted. Verified drivers in your area will review and send offers.`,
+    });
+  };
+
+  // Open Driver Offer Modal
+  const handleOpenOfferModal = (req: PassengerRideRequest) => {
+    setSelectedReqForOffer(req);
+    setOfferPrice(req.budgetPrice);
+    setOfferMessage('Ready to drive. Chilled AC, sanitized vehicle, respectful service.');
+  };
+
+  // Submit Driver Offer
+  const handleSubmitDriverOffer = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedReqForOffer || !currentUser) return;
+
+    const newOffer: DriverOffer = {
+      id: generateClientUniqueId('off'),
+      driverId: currentUser.id,
+      driverName: currentUser.name,
+      driverPhone: currentUser.phone,
+      driverRating: 4.9,
+      driverTier: 'TOP_RATED_DRIVER',
+      vehicleMakeModel: currentUser.vehicle?.makeModel || 'Toyota Corolla GLi',
+      vehiclePlate: currentUser.vehicle?.plate || 'LEB-4592',
+      offeredPrice: Number(offerPrice),
+      message: offerMessage.trim() || undefined,
+      createdAt: new Date().toISOString(),
+    };
+
+    setPassengerRequests((prev) =>
+      prev.map((r) => {
+        if (r.id === selectedReqForOffer.id) {
+          return {
+            ...r,
+            offers: [...r.offers, newOffer],
+          };
+        }
+        return r;
+      })
+    );
+
+    setSelectedReqForOffer(null);
+    setNotification({
+      type: 'success',
+      title: 'Offer Sent to Passenger!',
+      message: `Your offer of Rs. ${Number(offerPrice).toLocaleString()} was delivered to ${selectedReqForOffer.passengerName}.`,
+    });
+  };
+
+  // Accept Driver Offer (By Passenger)
+  const handleAcceptDriverOffer = (req: PassengerRideRequest, offer: DriverOffer) => {
+    setPassengerRequests((prev) =>
+      prev.map((r) => {
+        if (r.id === req.id) {
+          return {
+            ...r,
+            status: 'ACCEPTED',
+            acceptedOfferId: offer.id,
+          };
+        }
+        return r;
+      })
+    );
+
+    setNotification({
+      type: 'success',
+      title: 'Driver Confirmed!',
+      message: `You accepted ${offer.driverName}'s offer for Rs. ${offer.offeredPrice.toLocaleString()}. Safe travels with Apni Sawari!`,
+    });
   };
 
   // Driver Acceptance Handler
@@ -1204,6 +1536,19 @@ export default function Home() {
       status: 'PUBLISHED',
       autoReopenOnCancellation: true,
       notes: `${currentUser.vehicle?.makeModel || 'Toyota Corolla'} • Departs ${driverPostTime}. ${driverPostNotes}`,
+      driverTier: 'TOP_RATED_DRIVER',
+      isReturnDeal: driverPostIsReturnDeal,
+      roundTripAllowed: driverPostRoundTripAllowed,
+      roundTripWholeCarPrice: driverPostRoundTripAllowed ? Number(driverPostRoundTripPrice) : undefined,
+      travelComfort: {
+        acType: 'CHILLED_AC',
+        maxInBack: driverPostMaxInBack,
+        luggageCapacity: driverPostLuggage,
+        namazBreak: driverPostNamazBreak,
+        tollsIncluded: driverPostTollsIncluded,
+        familyOnboard: driverPostFamilyOnboard,
+        ladiesOnlySeats: driverPostLadiesOnly,
+      },
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -1227,19 +1572,19 @@ export default function Home() {
     if (currentUser && driverId === currentUser.id) return currentUser.name + ' (You)';
     switch (driverId) {
       case 'driver-tariq':
-        return 'Tariq Khan';
+        return 'Driver Tariq Khan';
       case 'driver-aslam':
-        return 'Aslam Memon';
+        return 'Driver Aslam Memon';
       case 'driver-kamran':
-        return 'Kamran Butt';
+        return 'Driver Kamran Butt';
       case 'driver-farhan':
-        return 'Farhan Shinwari';
+        return 'Driver Farhan Shinwari';
       case 'driver-bilal':
-        return 'Bilal Shah';
+        return 'Driver Bilal Shah';
       case 'driver-jameel':
-        return 'Jameel Soomro';
+        return 'Driver Jameel Soomro';
       default:
-        return 'Verified Captain';
+        return 'Verified Driver';
     }
   };
 
@@ -1253,12 +1598,12 @@ export default function Home() {
           {/* Logo Header */}
           <div className="text-center space-y-2">
             <span className="text-4xl block" role="img" aria-label="car">🚗</span>
-            <h1 className="text-2xl font-black tracking-tight">ReturnRide Pakistan</h1>
+            <h1 className="text-2xl font-black tracking-tight">Apni Sawari (اپنی سواری)</h1>
             <p className="text-xs text-emerald-400 font-bold uppercase tracking-wider">
-              Nationwide Intercity Ride Marketplace
+              Nationwide Intercity Ride Network
             </p>
             <p className="text-xs text-slate-400">
-              Safe, affordable intercity rides across Pakistan. Reserve entire cars or individual seats.
+              Trusted, affordable intercity travel across Pakistan. Reserve entire cars, single seats, or post your ride request on the Sawari Board.
             </p>
           </div>
 
@@ -1305,7 +1650,7 @@ export default function Home() {
                     }`}
                   >
                     <span className="text-xl">🙋‍♂️</span>
-                    <span className="font-extrabold text-xs mt-1 block text-white">Passenger</span>
+                    <span className="font-extrabold text-xs mt-1 block text-white">Sawari / Passenger</span>
                     <span className="text-[10px] text-slate-400">I need a ride / seats</span>
                   </button>
 
@@ -1319,7 +1664,7 @@ export default function Home() {
                     }`}
                   >
                     <span className="text-xl">🚘</span>
-                    <span className="font-extrabold text-xs mt-1 block text-white">Captain / Driver</span>
+                    <span className="font-extrabold text-xs mt-1 block text-white">Driver (ڈرائیور)</span>
                     <span className="text-[10px] text-slate-400">I have a car to offer</span>
                   </button>
                 </div>
@@ -1477,7 +1822,7 @@ export default function Home() {
                     </span>
                   </div>
                   <p className="text-[10px] text-slate-400">
-                    To keep Pakistani passengers safe, CNIC and Driving License are mandatory for all captains.
+                    To keep Pakistani passengers and families safe, CNIC and Driving License are verified for all drivers.
                   </p>
 
                   <div className="grid grid-cols-2 gap-2">
@@ -1591,7 +1936,7 @@ export default function Home() {
             </form>
           )}
 
-          {/* STEP 2: OTP VERIFICATION FORM (NO CODE LEAKED ON SCREEN) */}
+          {/* STEP 2: OTP VERIFICATION FORM */}
           {authView === 'VERIFY_OTP' && (
             <div className="space-y-4">
               <div className="text-center space-y-1.5">
@@ -1617,7 +1962,7 @@ export default function Home() {
                       Please check your <strong>Inbox</strong> and <strong>Spam/Junk</strong> folder.
                     </p>
                     <p className="text-[10px] text-emerald-400/80">
-                      💡 Tip: For 100% direct Gmail inbox delivery, configure your Google App Password in <code>.env.local</code>.
+                      💡 Tip: For direct Gmail delivery, credentials are authenticated.
                     </p>
                   </div>
                 ) : (
@@ -1658,7 +2003,7 @@ export default function Home() {
                       <span>Verifying Code...</span>
                     </>
                   ) : (
-                    <span>Verify &amp; Enter ReturnRide</span>
+                    <span>Verify &amp; Enter Apni Sawari</span>
                   )}
                 </button>
 
@@ -1686,7 +2031,7 @@ export default function Home() {
             </div>
           )}
 
-          {/* SIGN IN FORM (VERSATILE: EMAIL OR MOBILE NUMBER) */}
+          {/* SIGN IN FORM (EMAIL OR MOBILE NUMBER) */}
           {authView === 'LOGIN' && (
             <form onSubmit={handleLogin} className="space-y-4">
               <div>
@@ -1710,7 +2055,7 @@ export default function Home() {
                 type="submit"
                 className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3.5 px-4 rounded-2xl shadow-lg transition text-xs uppercase tracking-wider cursor-pointer"
               >
-                Sign In to ReturnRide
+                Sign In to Apni Sawari
               </button>
             </form>
           )}
@@ -1726,7 +2071,7 @@ export default function Home() {
                 onClick={() => handleDemoLogin('PASSENGER')}
                 className="bg-slate-700 hover:bg-slate-600 text-white py-2 px-3 rounded-xl text-xs font-bold transition flex flex-col items-center"
               >
-                <span>🙋‍♂️ Demo Passenger</span>
+                <span>🙋‍♂️ Demo Sawari</span>
                 <span className="text-[10px] text-slate-400 font-normal">ali@example.com</span>
               </button>
               <button
@@ -1734,7 +2079,7 @@ export default function Home() {
                 onClick={() => handleDemoLogin('DRIVER')}
                 className="bg-slate-700 hover:bg-slate-600 text-white py-2 px-3 rounded-xl text-xs font-bold transition flex flex-col items-center"
               >
-                <span>🚘 Demo Captain</span>
+                <span>🚘 Demo Driver</span>
                 <span className="text-[10px] text-slate-400 font-normal">tariq.captain@example.com</span>
               </button>
             </div>
@@ -1747,6 +2092,9 @@ export default function Home() {
   // =========================================================================
   // MAIN APP SCREEN (USER IS LOGGED IN)
   // =========================================================================
+  const openSawariRequestsCount = passengerRequests.filter((r) => r.status === 'OPEN').length;
+  const pendingDriverBookingsCount = bookings.filter((b) => b.status === 'PENDING').length;
+
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 font-sans antialiased pb-24">
       {/* Top Header */}
@@ -1755,8 +2103,8 @@ export default function Home() {
           <div className="flex items-center gap-2">
             <span className="text-2xl" role="img" aria-label="car">🚗</span>
             <div>
-              <h1 className="text-xl font-black tracking-tight leading-none">ReturnRide</h1>
-              <p className="text-[10px] text-emerald-200 font-medium">Pakistan Intercity Marketplace</p>
+              <h1 className="text-xl font-black tracking-tight leading-none">Apni Sawari</h1>
+              <p className="text-[10px] text-emerald-200 font-medium">اپنی سواری • Pakistan Intercity Network</p>
             </div>
           </div>
 
@@ -1768,13 +2116,13 @@ export default function Home() {
             <span>{currentUser.avatarUrl || (currentUser.role === 'DRIVER' ? '👨‍✈️' : '🧑')}</span>
             <span className="max-w-[70px] truncate sm:max-w-none">{currentUser.name}</span>
             {currentUser.role === 'DRIVER' && currentUser.verificationStatus === 'VERIFIED' && (
-              <span className="text-amber-400 font-bold" title="Verified Captain">🛡️</span>
+              <span className="text-amber-400 font-bold" title="Verified Driver">🛡️</span>
             )}
           </button>
         </div>
 
-        {/* 4 Navigation Tabs */}
-        <div className="max-w-xl mx-auto px-4 grid grid-cols-4 gap-1 pb-2">
+        {/* 5 Navigation Tabs */}
+        <div className="max-w-xl mx-auto px-2 grid grid-cols-5 gap-1 pb-2">
           {/* Passenger Book Ride Tab */}
           <button
             onClick={() => {
@@ -1801,20 +2149,47 @@ export default function Home() {
             }`}
           >
             <span>📋</span>
-            <span>All Rides ({rides.length})</span>
+            <span>Rides ({rides.length})</span>
+          </button>
+
+          {/* Sawari Board (Reverse Marketplace) Tab */}
+          <button
+            onClick={() => setActiveTab('sawari_board')}
+            className={`py-2 px-0.5 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-0.5 transition relative ${
+              activeTab === 'sawari_board'
+                ? 'bg-white text-emerald-900 shadow-md font-black'
+                : 'bg-emerald-900/60 text-emerald-100 hover:bg-emerald-900'
+            }`}
+          >
+            <div className="relative">
+              <span>📢</span>
+              {openSawariRequestsCount > 0 && (
+                <span className="absolute -top-1 -right-2 w-3.5 h-3.5 bg-amber-400 text-slate-900 text-[9px] font-black rounded-full flex items-center justify-center">
+                  {openSawariRequestsCount}
+                </span>
+              )}
+            </div>
+            <span>Board</span>
           </button>
 
           {/* Driver Portal Tab */}
           <button
             onClick={() => setActiveTab('driver')}
-            className={`py-2 px-0.5 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-0.5 transition ${
+            className={`py-2 px-0.5 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-0.5 transition relative ${
               activeTab === 'driver'
                 ? 'bg-white text-emerald-900 shadow-md font-black'
                 : 'bg-emerald-900/60 text-emerald-100 hover:bg-emerald-900'
             }`}
           >
-            <span>🚘</span>
-            <span>Driver ({bookings.filter((b) => b.status === 'PENDING').length})</span>
+            <div className="relative">
+              <span>🚘</span>
+              {pendingDriverBookingsCount > 0 && (
+                <span className="absolute -top-1 -right-2 w-3.5 h-3.5 bg-amber-400 text-slate-900 text-[9px] font-black rounded-full flex items-center justify-center">
+                  {pendingDriverBookingsCount}
+                </span>
+              )}
+            </div>
+            <span>Driver</span>
           </button>
 
           {/* Profile & Verification Tab */}
@@ -1942,40 +2317,107 @@ export default function Home() {
             {matchingRides.length > 0 ? (
               <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                 {/* Driver Info Header */}
-                <div className="p-4 bg-gradient-to-r from-slate-50 to-white border-b border-slate-100 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-full bg-emerald-100 border border-emerald-300 flex items-center justify-center text-xl font-bold text-emerald-800">
-                      👨‍✈️
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-extrabold text-slate-900 text-base">
-                          {getDriverDisplayName(currentRide.driverId)}
-                        </span>
-                        <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5">
-                          <span>🛡️</span>
-                          <span>VERIFIED</span>
-                        </span>
+                <div className="p-4 bg-gradient-to-r from-slate-50 to-white border-b border-slate-100 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-full bg-emerald-100 border border-emerald-300 flex items-center justify-center text-xl font-bold text-emerald-800">
+                        👨‍✈️
                       </div>
-                      <p className="text-xs text-slate-500 font-medium">{currentRide.notes}</p>
+                      <div>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-extrabold text-slate-900 text-base">
+                            {getDriverDisplayName(currentRide.driverId)}
+                          </span>
+                          <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5">
+                            <span>🛡️</span>
+                            <span>VERIFIED</span>
+                          </span>
+                          {currentRide.driverTier === 'TOP_RATED_DRIVER' ? (
+                            <span className="text-[10px] bg-amber-100 text-amber-900 px-1.5 py-0.5 rounded font-black">
+                              ⭐ Top-Rated Driver
+                            </span>
+                          ) : currentRide.driverTier === 'EXPERIENCED_DRIVER' ? (
+                            <span className="text-[10px] bg-blue-100 text-blue-900 px-1.5 py-0.5 rounded font-bold">
+                              🚗 Experienced Driver
+                            </span>
+                          ) : (
+                            <span className="text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded font-semibold">
+                              🌱 Verified Driver
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-500 font-medium">{currentRide.notes}</p>
+                      </div>
+                    </div>
+
+                    <div>
+                      {currentRide.status === 'PUBLISHED' && (
+                        <span className="text-xs font-extrabold px-3 py-1.5 rounded-full bg-emerald-100 text-emerald-800 flex items-center gap-1">
+                          <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse"></span>
+                          Available
+                        </span>
+                      )}
+                      {currentRide.status === 'FULL_CAR_BOOKED' && (
+                        <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-purple-100 text-purple-800">
+                          Full Car Booked
+                        </span>
+                      )}
+                      {currentRide.status === 'SEATS_FILLED' && (
+                        <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-amber-100 text-amber-800">
+                          All Seats Filled
+                        </span>
+                      )}
                     </div>
                   </div>
 
-                  <div>
-                    {currentRide.status === 'PUBLISHED' && (
-                      <span className="text-xs font-extrabold px-3 py-1.5 rounded-full bg-emerald-100 text-emerald-800 flex items-center gap-1">
-                        <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse"></span>
-                        Available
+                  {/* Cultural & Travel Comfort Badges */}
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {currentRide.isReturnDeal && (
+                      <span className="text-[10px] bg-rose-100 text-rose-800 px-2 py-0.5 rounded-full font-black flex items-center gap-1 border border-rose-200">
+                        <span>🏷️</span>
+                        <span>Khali Wapsi Deal (Special Discount)</span>
                       </span>
                     )}
-                    {currentRide.status === 'FULL_CAR_BOOKED' && (
-                      <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-purple-100 text-purple-800">
-                        Full Car Booked
+                    {currentRide.travelComfort?.familyOnboard && (
+                      <span className="text-[10px] bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded-full font-black flex items-center gap-1 border border-emerald-300">
+                        <span>👨‍👩‍👧</span>
+                        <span>Family Onboard (Gharana Safar)</span>
                       </span>
                     )}
-                    {currentRide.status === 'SEATS_FILLED' && (
-                      <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-amber-100 text-amber-800">
-                        All Seats Filled
+                    {currentRide.travelComfort?.ladiesOnlySeats && (
+                      <span className="text-[10px] bg-purple-100 text-purple-900 px-2 py-0.5 rounded-full font-black flex items-center gap-1 border border-purple-200">
+                        <span>🧕</span>
+                        <span>Ladies Modesty Reserved</span>
+                      </span>
+                    )}
+                    {currentRide.travelComfort?.acType === 'CHILLED_AC' && (
+                      <span className="text-[10px] bg-cyan-100 text-cyan-900 px-2 py-0.5 rounded-full font-bold flex items-center gap-1 border border-cyan-200">
+                        <span>❄️</span>
+                        <span>Chilled AC</span>
+                      </span>
+                    )}
+                    {currentRide.travelComfort?.maxInBack === 2 && (
+                      <span className="text-[10px] bg-blue-100 text-blue-900 px-2 py-0.5 rounded-full font-bold flex items-center gap-1 border border-blue-200">
+                        <span>🛋️</span>
+                        <span>Max 2 in Back</span>
+                      </span>
+                    )}
+                    {currentRide.travelComfort?.namazBreak && (
+                      <span className="text-[10px] bg-amber-100 text-amber-900 px-2 py-0.5 rounded-full font-bold flex items-center gap-1 border border-amber-200">
+                        <span>🕌</span>
+                        <span>15-Min Namaz &amp; Chai Break</span>
+                      </span>
+                    )}
+                    {currentRide.travelComfort?.tollsIncluded && (
+                      <span className="text-[10px] bg-slate-100 text-slate-800 px-2 py-0.5 rounded-full font-bold flex items-center gap-1 border border-slate-200">
+                        <span>✅</span>
+                        <span>Toll Plaza Included</span>
+                      </span>
+                    )}
+                    {currentRide.travelComfort?.luggageCapacity === 'FULL_TRUNK' && (
+                      <span className="text-[10px] bg-teal-100 text-teal-900 px-2 py-0.5 rounded-full font-bold flex items-center gap-1 border border-teal-200">
+                        <span>🧳</span>
+                        <span>Full Clean Trunk (No CNG Cylinder)</span>
                       </span>
                     )}
                   </div>
@@ -2004,40 +2446,143 @@ export default function Home() {
                       <div className="grid grid-cols-1 gap-2.5">
                         {/* Whole Car Option */}
                         {currentRide.bookingMode !== 'SEATS' && (
-                          <label
-                            className={`p-3.5 rounded-2xl border-2 cursor-pointer transition flex items-center justify-between ${
-                              bookingType === 'WHOLE_CAR'
-                                ? 'border-emerald-600 bg-emerald-50/70 shadow-sm'
-                                : 'border-slate-200 hover:border-slate-300 bg-white'
-                            }`}
-                          >
-                            <div className="flex items-center gap-3">
-                              <input
-                                type="radio"
-                                name="bookingType"
-                                value="WHOLE_CAR"
-                                checked={bookingType === 'WHOLE_CAR'}
-                                onChange={() => setBookingType('WHOLE_CAR')}
-                                className="w-5 h-5 accent-emerald-600"
-                              />
-                              <div>
-                                <div className="font-extrabold text-slate-900 text-sm flex items-center gap-1.5">
-                                  <span>🚗</span>
-                                  <span>Entire Car (Poori Gaari)</span>
+                          <div className="space-y-2">
+                            <label
+                              className={`p-3.5 rounded-2xl border-2 cursor-pointer transition flex items-center justify-between ${
+                                bookingType === 'WHOLE_CAR'
+                                  ? 'border-emerald-600 bg-emerald-50/70 shadow-sm'
+                                  : 'border-slate-200 hover:border-slate-300 bg-white'
+                              }`}
+                            >
+                              <div className="flex items-center gap-3">
+                                <input
+                                  type="radio"
+                                  name="bookingType"
+                                  value="WHOLE_CAR"
+                                  checked={bookingType === 'WHOLE_CAR'}
+                                  onChange={() => setBookingType('WHOLE_CAR')}
+                                  className="w-5 h-5 accent-emerald-600"
+                                />
+                                <div>
+                                  <div className="font-extrabold text-slate-900 text-sm flex items-center gap-1.5">
+                                    <span>🚗</span>
+                                    <span>Entire Car (Poori Gaari)</span>
+                                  </div>
+                                  <p className="text-[11px] text-slate-500 mt-0.5">
+                                    Private vehicle exclusively for you and your family.
+                                  </p>
                                 </div>
-                                <p className="text-[11px] text-slate-500 mt-0.5">
-                                  Private vehicle for you and your family.
-                                </p>
                               </div>
-                            </div>
 
-                            <div className="text-right">
-                              <span className="block text-sm font-black text-emerald-800">
-                                Rs. {activeWholeCarPrice.toLocaleString()}
-                              </span>
-                              <span className="text-[10px] text-slate-500 font-semibold">Total Price</span>
-                            </div>
-                          </label>
+                              <div className="text-right">
+                                <span className="block text-sm font-black text-emerald-800">
+                                  Rs. {activeWholeCarPrice.toLocaleString()}
+                                </span>
+                                <span className="text-[10px] text-slate-500 font-semibold">One-Way Fare</span>
+                              </div>
+                            </label>
+
+                            {/* ROUND TRIP TOGGLE & CONTROLS FOR ENTIRE CAR */}
+                            {bookingType === 'WHOLE_CAR' && (
+                              <div className="p-3.5 bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-300 rounded-2xl space-y-3 shadow-xs">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-black text-emerald-950 flex items-center gap-1.5">
+                                    <span>🔄</span>
+                                    <span>Need Return with Same Driver? (Wapsi Safar)</span>
+                                  </span>
+                                  <label className="relative inline-flex items-center cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={isWholeCarRoundTrip}
+                                      onChange={(e) => setIsWholeCarRoundTrip(e.target.checked)}
+                                      className="sr-only peer"
+                                    />
+                                    <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                                  </label>
+                                </div>
+
+                                {isWholeCarRoundTrip && (
+                                  <div className="space-y-3 pt-1 border-t border-emerald-200">
+                                    {/* Round trip package savings pill */}
+                                    <div className="bg-emerald-700 text-white p-2.5 rounded-xl text-xs font-bold flex items-center justify-between shadow-xs">
+                                      <span className="flex items-center gap-1">
+                                        <span>🏷️</span>
+                                        <span>Round-Trip Package Deal</span>
+                                      </span>
+                                      <span className="bg-emerald-950/60 px-2 py-0.5 rounded-md text-[11px] font-black text-amber-300">
+                                        Total: Rs. {roundTripWholePrice.toLocaleString()} (Saves Rs. {(activeWholeCarPrice * 2 - roundTripWholePrice).toLocaleString()}!)
+                                      </span>
+                                    </div>
+
+                                    {/* Same Day Wait vs Multi-Day */}
+                                    <div>
+                                      <span className="block text-[11px] font-bold text-slate-700 mb-1.5">
+                                        Select Return Schedule:
+                                      </span>
+                                      <div className="grid grid-cols-2 gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={() => setRoundTripType('SAME_DAY_WAIT')}
+                                          className={`p-2.5 rounded-xl border text-left transition cursor-pointer ${
+                                            roundTripType === 'SAME_DAY_WAIT'
+                                              ? 'bg-emerald-700 text-white border-emerald-700 font-extrabold shadow-xs'
+                                              : 'bg-white text-slate-800 border-emerald-200 font-semibold hover:bg-emerald-50'
+                                          }`}
+                                        >
+                                          <span className="text-xs block">🕒 Same-Day Return</span>
+                                          <span className="text-[10px] opacity-80 block mt-0.5">
+                                            Driver waits for you (Hospital / Work / Shopping)
+                                          </span>
+                                        </button>
+
+                                        <button
+                                          type="button"
+                                          onClick={() => setRoundTripType('MULTI_DAY')}
+                                          className={`p-2.5 rounded-xl border text-left transition cursor-pointer ${
+                                            roundTripType === 'MULTI_DAY'
+                                              ? 'bg-emerald-700 text-white border-emerald-700 font-extrabold shadow-xs'
+                                              : 'bg-white text-slate-800 border-emerald-200 font-semibold hover:bg-emerald-50'
+                                          }`}
+                                        >
+                                          <span className="text-xs block">📅 Later Date Return</span>
+                                          <span className="text-[10px] opacity-80 block mt-0.5">
+                                            Return on a scheduled future date
+                                          </span>
+                                        </button>
+                                      </div>
+                                    </div>
+
+                                    {/* Date & Time fields */}
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <div>
+                                        <label className="block text-[10px] font-bold text-slate-600 mb-1">
+                                          Return Date:
+                                        </label>
+                                        <input
+                                          type="date"
+                                          value={returnTripDate}
+                                          onChange={(e) => setReturnTripDate(e.target.value)}
+                                          className="w-full bg-white border border-emerald-300 rounded-xl px-2.5 py-1.5 text-xs font-bold text-slate-900"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="block text-[10px] font-bold text-slate-600 mb-1">
+                                          Expected Return Time:
+                                        </label>
+                                        <input
+                                          type="text"
+                                          value={returnTripTime}
+                                          onChange={(e) => setReturnTripTime(e.target.value)}
+                                          placeholder="06:00 PM"
+                                          className="w-full bg-white border border-emerald-300 rounded-xl px-2.5 py-1.5 text-xs font-bold text-slate-900"
+                                        />
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         )}
 
                         {/* Individual Seats Option */}
@@ -2233,19 +2778,24 @@ export default function Home() {
                             ? customDropoffStop || `${destName} (En Route)`
                             : effectiveDropoffStop}{' '}
                           <span className="text-slate-600 font-semibold">
-                            ({bookingType === 'WHOLE_CAR' ? 'Entire Car' : `${seatsRequested} Seat(s)`})
+                            ({bookingType === 'WHOLE_CAR' ? (isWholeCarRoundTrip ? 'Entire Car • Round-Trip' : 'Entire Car • One-Way') : `${seatsRequested} Seat(s)`})
                           </span>
                         </span>
                       </div>
                       <div className="flex items-center justify-between text-xs pt-1.5 border-t border-emerald-200">
                         <span className="font-bold flex items-center gap-1.5">
-                          <span>💵</span> Cash Due to Captain on Boarding:
+                          <span>💵</span> Cash Due to Driver on Boarding:
                         </span>
                         <span className="font-black text-emerald-800 text-base">
                           Rs. {currentPrice.toLocaleString()}{' '}
                           {bookingType === 'SEAT' && (
                             <span className="text-[11px] font-normal text-slate-600">
                               ({seatsRequested} seat{seatsRequested > 1 ? 's' : ''} @ Rs. {activeSeatUnitPrice.toLocaleString()})
+                            </span>
+                          )}
+                          {bookingType === 'WHOLE_CAR' && isWholeCarRoundTrip && (
+                            <span className="text-[11px] font-black text-emerald-700 block">
+                              (Round-Trip Package • Same Driver)
                             </span>
                           )}
                         </span>
@@ -2277,20 +2827,20 @@ export default function Home() {
                   No direct ride found between {originName} and {destName}
                 </h3>
                 <p className="text-xs text-slate-500 max-w-xs mx-auto">
-                  Browse all active nationwide rides, or choose a different route.
+                  Browse all active nationwide rides, or post your ride request on the Sawari Board.
                 </p>
                 <div className="flex justify-center gap-2">
                   <button
                     onClick={() => setShowQuickRouteModal(true)}
-                    className="bg-emerald-700 text-white font-bold text-xs py-2 px-4 rounded-xl transition"
+                    className="bg-emerald-700 text-white font-bold text-xs py-2 px-4 rounded-xl transition cursor-pointer"
                   >
                     Change Route
                   </button>
                   <button
-                    onClick={() => setActiveTab('all_listings')}
-                    className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs py-2 px-4 rounded-xl transition"
+                    onClick={() => setActiveTab('sawari_board')}
+                    className="bg-amber-500 hover:bg-amber-600 text-slate-900 font-black text-xs py-2 px-4 rounded-xl transition cursor-pointer"
                   >
-                    View All Rides
+                    📢 Post on Sawari Board
                   </button>
                 </div>
               </div>
@@ -2317,9 +2867,20 @@ export default function Home() {
                       }`}
                     >
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-black text-slate-900">
-                          {b.bookingType === 'WHOLE_CAR' ? '🚗 Full Car Booking' : `💺 ${b.requestedSeats} Seat(s)`}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-black text-slate-900">
+                            {b.bookingType === 'WHOLE_CAR'
+                              ? b.isRoundTrip
+                                ? '🚗 Full Car • Round-Trip'
+                                : '🚗 Full Car Booking'
+                              : `💺 ${b.requestedSeats} Seat(s)`}
+                          </span>
+                          {b.isRoundTrip && (
+                            <span className="text-[10px] bg-amber-100 text-amber-900 font-bold px-1.5 py-0.2 rounded">
+                              🔄 Return Journey Included
+                            </span>
+                          )}
+                        </div>
 
                         <span
                           className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase ${
@@ -2346,17 +2907,17 @@ export default function Home() {
                         </div>
                       )}
 
-                      {/* In-App Protection & Boarding Checkpoint (Disintermediation-Free) */}
+                      {/* In-App Protection & Boarding Checkpoint */}
                       {b.status === 'ACCEPTED' && (
                         <div className="mt-2.5 pt-2 border-t border-emerald-200 space-y-2">
                           <div className="bg-emerald-50 text-emerald-950 p-2.5 rounded-xl border border-emerald-300 text-xs flex items-start gap-2">
                             <span className="text-base">🛡️</span>
                             <div>
                               <div className="font-extrabold text-[11px] uppercase tracking-wide text-emerald-900">
-                                ReturnRide In-App Trip Protection Active
+                                Apni Sawari In-App Trip Protection Active
                               </div>
                               <p className="text-[11px] text-emerald-800 mt-0.5 leading-relaxed">
-                                All trip coordination is protected inside ReturnRide to secure your fare and reliability score. External contact numbers are masked for passenger &amp; platform safety.
+                                All trip coordination is protected inside Apni Sawari to secure your fare and reliability score. External contact numbers are masked for passenger &amp; driver safety.
                               </p>
                             </div>
                           </div>
@@ -2373,7 +2934,7 @@ export default function Home() {
                               <span>💵</span> Cash Due on Boarding:
                             </span>
                             <span className="font-extrabold text-emerald-800 text-sm">
-                              Rs. {b.totalPrice.toLocaleString()} (Direct to Captain)
+                              Rs. {b.totalPrice.toLocaleString()} (Direct to Driver)
                             </span>
                           </div>
                         </div>
@@ -2404,10 +2965,70 @@ export default function Home() {
                     setFilterDest('ALL');
                     setFilterTime('ALL');
                     setFilterMode('ALL');
+                    setAllRidesFilterTag('ALL');
                   }}
                   className="text-[11px] text-emerald-700 font-bold hover:underline"
                 >
                   Clear Filters
+                </button>
+              </div>
+
+              {/* Cultural & Trust Filter Chips */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar text-xs">
+                <button
+                  type="button"
+                  onClick={() => setAllRidesFilterTag('ALL')}
+                  className={`px-3 py-1.5 rounded-full font-bold whitespace-nowrap transition cursor-pointer ${
+                    allRidesFilterTag === 'ALL'
+                      ? 'bg-emerald-800 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  All Rides ({rides.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAllRidesFilterTag('KHALI_WAPSI')}
+                  className={`px-3 py-1.5 rounded-full font-bold whitespace-nowrap transition cursor-pointer ${
+                    allRidesFilterTag === 'KHALI_WAPSI'
+                      ? 'bg-rose-700 text-white shadow-xs'
+                      : 'bg-rose-50 text-rose-800 border border-rose-200 hover:bg-rose-100'
+                  }`}
+                >
+                  🏷️ Khali Wapsi Deals
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAllRidesFilterTag('FAMILY')}
+                  className={`px-3 py-1.5 rounded-full font-bold whitespace-nowrap transition cursor-pointer ${
+                    allRidesFilterTag === 'FAMILY'
+                      ? 'bg-emerald-700 text-white shadow-xs'
+                      : 'bg-emerald-50 text-emerald-900 border border-emerald-200 hover:bg-emerald-100'
+                  }`}
+                >
+                  👨‍👩‍👧 Family Onboard
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAllRidesFilterTag('MAX_2_BACK')}
+                  className={`px-3 py-1.5 rounded-full font-bold whitespace-nowrap transition cursor-pointer ${
+                    allRidesFilterTag === 'MAX_2_BACK'
+                      ? 'bg-blue-700 text-white shadow-xs'
+                      : 'bg-blue-50 text-blue-900 border border-blue-200 hover:bg-blue-100'
+                  }`}
+                >
+                  🛋️ Max 2 in Back
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAllRidesFilterTag('LADIES_ONLY')}
+                  className={`px-3 py-1.5 rounded-full font-bold whitespace-nowrap transition cursor-pointer ${
+                    allRidesFilterTag === 'LADIES_ONLY'
+                      ? 'bg-purple-700 text-white shadow-xs'
+                      : 'bg-purple-50 text-purple-900 border border-purple-200 hover:bg-purple-100'
+                  }`}
+                >
+                  🧕 Ladies Only
                 </button>
               </div>
 
@@ -2518,9 +3139,53 @@ export default function Home() {
                       </span>
                     </div>
 
+                    {/* Cultural & Trust Badges Row */}
+                    <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                      {rideItem.isReturnDeal && (
+                        <span className="text-[10px] bg-rose-100 text-rose-800 font-bold px-2 py-0.5 rounded-md border border-rose-200">
+                          🏷️ Khali Wapsi Deal
+                        </span>
+                      )}
+                      {rideItem.travelComfort?.familyOnboard && (
+                        <span className="text-[10px] bg-emerald-100 text-emerald-900 font-bold px-2 py-0.5 rounded-md border border-emerald-200">
+                          👨‍👩‍👧 Family Onboard
+                        </span>
+                      )}
+                      {rideItem.travelComfort?.ladiesOnlySeats && (
+                        <span className="text-[10px] bg-purple-100 text-purple-900 font-bold px-2 py-0.5 rounded-md border border-purple-200">
+                          🧕 Ladies Only
+                        </span>
+                      )}
+                      {rideItem.travelComfort?.acType === 'CHILLED_AC' && (
+                        <span className="text-[10px] bg-cyan-100 text-cyan-900 font-semibold px-2 py-0.5 rounded-md">
+                          ❄️ Chilled AC
+                        </span>
+                      )}
+                      {rideItem.travelComfort?.maxInBack === 2 && (
+                        <span className="text-[10px] bg-blue-100 text-blue-900 font-semibold px-2 py-0.5 rounded-md">
+                          🛋️ Max 2 in Back
+                        </span>
+                      )}
+                      {rideItem.travelComfort?.namazBreak && (
+                        <span className="text-[10px] bg-amber-100 text-amber-900 font-semibold px-2 py-0.5 rounded-md">
+                          🕌 Namaz Break
+                        </span>
+                      )}
+                      {rideItem.roundTripAllowed && (
+                        <span className="text-[10px] bg-teal-100 text-teal-900 font-bold px-2 py-0.5 rounded-md border border-teal-200">
+                          🔄 Round-Trip Available
+                        </span>
+                      )}
+                    </div>
+
                     <div className="flex items-center justify-between text-xs text-slate-500 border-y border-slate-100 py-2">
                       <div>
-                        <span className="font-bold text-slate-700">{getDriverDisplayName(rideItem.driverId)}</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-bold text-slate-800">{getDriverDisplayName(rideItem.driverId)}</span>
+                          {rideItem.driverTier === 'TOP_RATED_DRIVER' && (
+                            <span className="text-[10px] bg-amber-100 text-amber-800 px-1 py-0.2 rounded font-black">⭐ 4.9</span>
+                          )}
+                        </div>
                         <span className="block text-[11px] text-slate-400">Departure: {timeFormatted}</span>
                       </div>
                       <div className="text-right">
@@ -2558,6 +3223,11 @@ export default function Home() {
                         <span className="text-sm font-black text-emerald-800">
                           Full Car: Rs. {rideItem.wholeCarPrice.toLocaleString()}
                         </span>
+                        {rideItem.roundTripAllowed && rideItem.roundTripWholeCarPrice && (
+                          <span className="text-[10px] font-black text-teal-700 block">
+                            Round-Trip Package: Rs. {rideItem.roundTripWholeCarPrice.toLocaleString()}
+                          </span>
+                        )}
                       </div>
 
                       {/* Select Action */}
@@ -2587,7 +3257,348 @@ export default function Home() {
         )}
 
         {/* ========================================================================= */}
-        {/* TAB 3: DRIVER PORTAL */}
+        {/* TAB 3: SAWARI REQUEST BOARD (سواری بورڈ) - REVERSE MARKETPLACE */}
+        {/* ========================================================================= */}
+        {activeTab === 'sawari_board' && (
+          <div className="space-y-4">
+            {/* Board Intro Header & Post CTA */}
+            <div className="bg-gradient-to-br from-emerald-800 to-teal-900 text-white p-5 rounded-3xl shadow-md space-y-3">
+              <div className="flex items-start justify-between">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">📢</span>
+                    <h2 className="text-lg font-black tracking-tight">Sawari Request Board</h2>
+                  </div>
+                  <p className="text-xs text-emerald-200 mt-0.5">
+                    سواری بورڈ • مسافر اپنی ضرورت بتائیں، ڈرائیور رابطہ کریں
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowPostRequestModal(true)}
+                  className="bg-amber-400 hover:bg-amber-300 text-slate-900 font-black text-xs py-2.5 px-3.5 rounded-2xl shadow-sm transition flex items-center gap-1.5 cursor-pointer shrink-0"
+                >
+                  <span>➕</span>
+                  <span>Post Sawari Request</span>
+                </button>
+              </div>
+
+              <p className="text-xs text-emerald-100/90 leading-relaxed">
+                Can&apos;t find a matching ride? <strong>Post where you need to travel</strong>. Verified drivers heading that way will submit competitive offers or accept at your budget fare.
+              </p>
+
+              {/* City & Type Filter Pills */}
+              <div className="pt-1 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+                <button
+                  type="button"
+                  onClick={() => setSawariFilterCity('ALL')}
+                  className={`px-3 py-1.5 rounded-xl font-bold text-xs whitespace-nowrap transition cursor-pointer ${
+                    sawariFilterCity === 'ALL'
+                      ? 'bg-white text-emerald-950 font-black'
+                      : 'bg-emerald-950/60 text-emerald-200 hover:bg-emerald-950'
+                  }`}
+                >
+                  All Pakistan ({passengerRequests.length})
+                </button>
+
+                {currentUser?.city && (
+                  <button
+                    type="button"
+                    onClick={() => setSawariFilterCity(currentUser.city || '')}
+                    className={`px-3 py-1.5 rounded-xl font-bold text-xs whitespace-nowrap transition cursor-pointer ${
+                      sawariFilterCity === currentUser.city
+                        ? 'bg-white text-emerald-950 font-black'
+                        : 'bg-emerald-950/60 text-emerald-200 hover:bg-emerald-950'
+                    }`}
+                  >
+                    🟢 Near You ({currentUser.city})
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setSawariFilterType(sawariFilterType === 'WHOLE_CAR' ? 'ALL' : 'WHOLE_CAR')}
+                  className={`px-3 py-1.5 rounded-xl font-bold text-xs whitespace-nowrap transition cursor-pointer ${
+                    sawariFilterType === 'WHOLE_CAR'
+                      ? 'bg-white text-emerald-950 font-black'
+                      : 'bg-emerald-950/60 text-emerald-200 hover:bg-emerald-950'
+                  }`}
+                >
+                  🚗 Full Car Only
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSawariFilterType(sawariFilterType === 'SEAT' ? 'ALL' : 'SEAT')}
+                  className={`px-3 py-1.5 rounded-xl font-bold text-xs whitespace-nowrap transition cursor-pointer ${
+                    sawariFilterType === 'SEAT'
+                      ? 'bg-white text-emerald-950 font-black'
+                      : 'bg-emerald-950/60 text-emerald-200 hover:bg-emerald-950'
+                  }`}
+                >
+                  💺 Seats Only
+                </button>
+              </div>
+            </div>
+
+            {/* Stream of Passenger Requests */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-xs text-slate-500 font-bold px-1">
+                <span>Active Sawari Darkhwast ({filteredPassengerRequests.length})</span>
+                <span>Open for Driver Offers</span>
+              </div>
+
+              {filteredPassengerRequests.length === 0 ? (
+                <div className="bg-white p-8 rounded-3xl border border-slate-200 text-center space-y-3">
+                  <span className="text-4xl block">📬</span>
+                  <h4 className="text-sm font-extrabold text-slate-800">No requests found for this filter</h4>
+                  <p className="text-xs text-slate-500 max-w-xs mx-auto">
+                    Be the first to post a request or clear your filters to view requests from other cities.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setShowPostRequestModal(true)}
+                    className="bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-2.5 px-4 rounded-xl transition cursor-pointer"
+                  >
+                    Post a Ride Request Now
+                  </button>
+                </div>
+              ) : (
+                filteredPassengerRequests.map((req) => {
+                  const isOwner = currentUser?.id === req.passengerId;
+                  const isDriver = currentUser?.role === 'DRIVER';
+
+                  return (
+                    <div
+                      key={req.id}
+                      className={`bg-white rounded-3xl p-5 border transition shadow-sm space-y-3.5 ${
+                        req.status === 'ACCEPTED'
+                          ? 'border-emerald-300 bg-emerald-50/40'
+                          : 'border-slate-200 hover:border-emerald-300'
+                      }`}
+                    >
+                      {/* Route & Status */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base font-black text-slate-900">{req.originName}</span>
+                          <span className="text-emerald-700 font-bold">➔</span>
+                          <span className="text-base font-black text-slate-900">{req.destinationName}</span>
+                        </div>
+
+                        <span
+                          className={`text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase ${
+                            req.status === 'ACCEPTED'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-amber-100 text-amber-800'
+                          }`}
+                        >
+                          {req.status === 'ACCEPTED' ? '✓ Driver Confirmed' : '🟢 Open for Offers'}
+                        </span>
+                      </div>
+
+                      {/* Travel Date & Preference Tags */}
+                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
+                        <span className="bg-slate-100 text-slate-800 font-bold px-2 py-0.5 rounded-lg text-[11px] flex items-center gap-1">
+                          <span>📅</span>
+                          <span>{req.travelDate} ({req.desiredTime})</span>
+                        </span>
+
+                        <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold px-2 py-0.5 rounded-lg text-[11px]">
+                          {req.bookingType === 'WHOLE_CAR' ? '🚗 Full Car Required' : `💺 ${req.seatsCount} Seat(s)`}
+                        </span>
+
+                        {req.isFamilyTrip && (
+                          <span className="bg-purple-50 text-purple-800 border border-purple-200 font-bold px-2 py-0.5 rounded-lg text-[11px] flex items-center gap-1">
+                            <span>👨‍👩‍👧</span>
+                            <span>Family Trip (Gharana Safar)</span>
+                          </span>
+                        )}
+
+                        {req.acRequired && (
+                          <span className="bg-cyan-50 text-cyan-800 border border-cyan-200 font-bold px-2 py-0.5 rounded-lg text-[11px] flex items-center gap-1">
+                            <span>❄️</span>
+                            <span>AC Required</span>
+                          </span>
+                        )}
+
+                        {req.isRoundTrip && (
+                          <span className="bg-amber-50 text-amber-900 border border-amber-200 font-bold px-2 py-0.5 rounded-lg text-[11px] flex items-center gap-1">
+                            <span>🔄</span>
+                            <span>Round-Trip Wapsi Needed</span>
+                          </span>
+                        )}
+
+                        <span className="bg-slate-50 text-slate-700 border border-slate-200 font-bold px-2 py-0.5 rounded-lg text-[11px] flex items-center gap-1">
+                          <span>🧳</span>
+                          <span>
+                            {req.luggageSize === 'FULL_TRUNK'
+                              ? 'Full Trunk'
+                              : req.luggageSize === 'MEDIUM_SUITCASE'
+                              ? '1 Suitcase'
+                              : 'Cabin Only'}
+                          </span>
+                        </span>
+                      </div>
+
+                      {/* Requester Info & Special Instructions */}
+                      <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 text-xs text-slate-600 space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="font-extrabold text-slate-800 flex items-center gap-1.5">
+                            <span>🙋‍♂️</span>
+                            <span>{req.passengerName}</span>
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            Req #{req.id.slice(-6)}
+                          </span>
+                        </div>
+                        {req.notes && (
+                          <p className="text-slate-600 italic text-[11px] pt-0.5">
+                            &quot;{req.notes}&quot;
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Budget and Actions Bar */}
+                      <div className="flex items-center justify-between pt-1 border-t border-slate-100">
+                        <div>
+                          <span className="block text-[10px] font-bold text-slate-400 uppercase">
+                            Passenger Budget:
+                          </span>
+                          <span className="text-base font-black text-emerald-800">
+                            Rs. {req.budgetPrice.toLocaleString()}
+                          </span>
+                          <span className="text-[10px] text-slate-500 font-medium ml-1">
+                            (Direct Cash)
+                          </span>
+                        </div>
+
+                        {/* Driver Action Buttons */}
+                        {isDriver && req.status === 'OPEN' && (
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const defaultOffer: DriverOffer = {
+                                  id: generateClientUniqueId('off'),
+                                  driverId: currentUser.id,
+                                  driverName: currentUser.name,
+                                  driverPhone: currentUser.phone,
+                                  driverRating: 4.9,
+                                  driverTier: 'TOP_RATED_DRIVER',
+                                  vehicleMakeModel: currentUser.vehicle?.makeModel || 'Toyota Corolla GLi',
+                                  vehiclePlate: currentUser.vehicle?.plate || 'LEB-4592',
+                                  offeredPrice: req.budgetPrice,
+                                  message: 'Accepted at your budget. Clean AC car ready for family.',
+                                  createdAt: new Date().toISOString(),
+                                };
+                                setPassengerRequests((prev) =>
+                                  prev.map((r) =>
+                                    r.id === req.id ? { ...r, offers: [...r.offers, defaultOffer] } : r
+                                  )
+                                );
+                                setNotification({
+                                  type: 'success',
+                                  title: 'Offer Sent at Passenger Budget!',
+                                  message: `You offered Rs. ${req.budgetPrice.toLocaleString()} to ${req.passengerName}.`,
+                                });
+                              }}
+                              className="bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-2 px-3 rounded-xl transition shadow-xs flex items-center gap-1 cursor-pointer"
+                            >
+                              <span>⚡</span>
+                              <span>Accept Budget</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleOpenOfferModal(req)}
+                              className="bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 font-bold text-xs py-2 px-3 rounded-xl transition cursor-pointer"
+                            >
+                              Send Custom Offer
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Offers List (Visible to Passenger & Driver) */}
+                      {req.offers.length > 0 && (
+                        <div className="pt-2 border-t border-slate-100 space-y-2">
+                          <div className="flex items-center justify-between text-xs font-bold text-slate-600">
+                            <span className="flex items-center gap-1">
+                              <span>💬</span>
+                              <span>Driver Offers Received ({req.offers.length})</span>
+                            </span>
+                          </div>
+
+                          <div className="space-y-2">
+                            {req.offers.map((offer) => {
+                              const isAcceptedOffer = req.acceptedOfferId === offer.id;
+                              return (
+                                <div
+                                  key={offer.id}
+                                  className={`p-3 rounded-2xl border text-xs flex items-center justify-between ${
+                                    isAcceptedOffer
+                                      ? 'bg-emerald-100/70 border-emerald-400'
+                                      : 'bg-slate-50 border-slate-200'
+                                  }`}
+                                >
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-black text-slate-900">{offer.driverName}</span>
+                                      <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.2 rounded">
+                                        ⭐ {offer.driverRating || 4.9}
+                                      </span>
+                                      <span className="text-[10px] text-slate-500 font-semibold">
+                                        {offer.vehicleMakeModel} ({offer.vehiclePlate})
+                                      </span>
+                                    </div>
+                                    {offer.message && (
+                                      <p className="text-[11px] text-slate-600 mt-0.5">
+                                        &quot;{offer.message}&quot;
+                                      </p>
+                                    )}
+                                  </div>
+
+                                  <div className="text-right flex items-center gap-2.5">
+                                    <div>
+                                      <span className="block font-black text-sm text-emerald-800">
+                                        Rs. {offer.offeredPrice.toLocaleString()}
+                                      </span>
+                                    </div>
+
+                                    {/* Passenger can confirm this driver */}
+                                    {isOwner && req.status === 'OPEN' && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleAcceptDriverOffer(req, offer)}
+                                        className="bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-2 px-3 rounded-xl transition shadow-xs cursor-pointer"
+                                      >
+                                        Confirm Driver
+                                      </button>
+                                    )}
+
+                                    {isAcceptedOffer && (
+                                      <span className="text-[10px] font-black bg-emerald-700 text-white px-2 py-1 rounded-lg">
+                                        ✓ CONFIRMED
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB 4: DRIVER PORTAL */}
         {/* ========================================================================= */}
         {activeTab === 'driver' && (
           <div className="space-y-4">
@@ -2601,7 +3612,7 @@ export default function Home() {
                       {currentUser.verificationStatus === 'VERIFIED' ? (
                         <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-black flex items-center gap-1">
                           <span>🛡️</span>
-                          <span>VERIFIED CAPTAIN</span>
+                          <span>VERIFIED DRIVER</span>
                         </span>
                       ) : (
                         <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-black flex items-center gap-1">
@@ -2625,9 +3636,9 @@ export default function Home() {
               </div>
             ) : (
               <div className="bg-amber-50 p-4 rounded-2xl border border-amber-200 text-amber-900 space-y-2">
-                <h4 className="text-xs font-bold uppercase tracking-wider">You are signed in as Passenger</h4>
+                <h4 className="text-xs font-bold uppercase tracking-wider">You are signed in as Sawari (Passenger)</h4>
                 <p className="text-xs">
-                  To publish rides and earn as a driver, please register as a Driver or switch account in Profile.
+                  To list rides and earn as a driver, please register as a Driver or switch to demo driver account.
                 </p>
                 <button
                   onClick={() => {
@@ -2635,8 +3646,65 @@ export default function Home() {
                   }}
                   className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs py-2 px-3 rounded-xl transition"
                 >
-                  Switch to Captain Account
+                  Switch to Driver Account
                 </button>
+              </div>
+            )}
+
+            {/* Nearby Sawari Darkhwast for this Driver */}
+            {currentUser.role === 'DRIVER' && (
+              <div className="bg-gradient-to-r from-amber-500/10 via-emerald-500/10 to-teal-500/10 p-4 rounded-3xl border border-emerald-300 shadow-xs space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">📢</span>
+                    <h3 className="text-sm font-black text-slate-900">
+                      Nearby Sawari Requests in Your Area
+                    </h3>
+                  </div>
+                  <button
+                    onClick={() => setActiveTab('sawari_board')}
+                    className="text-xs text-emerald-800 font-extrabold hover:underline"
+                  >
+                    Open Sawari Board ({openSawariRequestsCount}) ➔
+                  </button>
+                </div>
+                <p className="text-xs text-slate-600">
+                  Passengers actively seeking rides in or near {currentUser.city || 'your area'}. Accept directly at their budget or send custom offers:
+                </p>
+
+                <div className="space-y-2">
+                  {passengerRequests
+                    .filter((r) => r.status === 'OPEN')
+                    .slice(0, 3)
+                    .map((nearReq) => (
+                      <div
+                        key={nearReq.id}
+                        className="p-3 bg-white rounded-2xl border border-slate-200 shadow-2xs flex items-center justify-between text-xs"
+                      >
+                        <div>
+                          <div className="font-extrabold text-slate-900 flex items-center gap-1.5">
+                            <span>{nearReq.originName} ➔ {nearReq.destinationName}</span>
+                            {nearReq.isFamilyTrip && (
+                              <span className="text-[10px] bg-purple-100 text-purple-900 px-1.5 py-0.2 rounded font-bold">
+                                👨‍👩‍👧 Family
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[11px] text-slate-500">
+                            {nearReq.travelDate} ({nearReq.desiredTime}) • Budget: <strong className="text-emerald-800 font-bold">Rs. {nearReq.budgetPrice.toLocaleString()}</strong> ({nearReq.bookingType === 'WHOLE_CAR' ? 'Full Car' : `${nearReq.seatsCount} Seats`})
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleOpenOfferModal(nearReq)}
+                          className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs py-1.5 px-3 rounded-xl transition shadow-xs cursor-pointer shrink-0"
+                        >
+                          Send Offer
+                        </button>
+                      </div>
+                    ))}
+                </div>
               </div>
             )}
 
@@ -2749,6 +3817,98 @@ export default function Home() {
                     </div>
                   </div>
 
+                  {/* Round Trip Package for Entire Car */}
+                  {driverPostMode !== 'SEATS' && (
+                    <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={driverPostRoundTripAllowed}
+                            onChange={(e) => setDriverPostRoundTripAllowed(e.target.checked)}
+                            className="w-4 h-4 accent-emerald-600 rounded"
+                          />
+                          <span>Allow Round-Trip Full Car (Same Driver Return)</span>
+                        </label>
+                      </div>
+
+                      {driverPostRoundTripAllowed && (
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                            Discounted Round-Trip Full Car Package Fare (Rs.)
+                          </label>
+                          <input
+                            type="number"
+                            value={driverPostRoundTripPrice}
+                            onChange={(e) => setDriverPostRoundTripPrice(Number(e.target.value))}
+                            className="w-full bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs font-semibold"
+                          />
+                          <p className="text-[10px] text-slate-400 mt-0.5">
+                            Typically discounted 30-40% compared to two separate trips (e.g. driver waits at destination).
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Trust & Comfort Toggles */}
+                  <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+                    <span className="block text-[11px] font-extrabold uppercase text-slate-500">
+                      Cultural &amp; Travel Comfort Badges:
+                    </span>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <label className="flex items-center gap-1.5 cursor-pointer text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={driverPostFamilyOnboard}
+                          onChange={(e) => setDriverPostFamilyOnboard(e.target.checked)}
+                          className="w-4 h-4 accent-emerald-600 rounded"
+                        />
+                        <span>👨‍👩‍👧 Family Traveling</span>
+                      </label>
+
+                      <label className="flex items-center gap-1.5 cursor-pointer text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={driverPostLadiesOnly}
+                          onChange={(e) => setDriverPostLadiesOnly(e.target.checked)}
+                          className="w-4 h-4 accent-purple-600 rounded"
+                        />
+                        <span>🧕 Ladies Only Seats</span>
+                      </label>
+
+                      <label className="flex items-center gap-1.5 cursor-pointer text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={driverPostNamazBreak}
+                          onChange={(e) => setDriverPostNamazBreak(e.target.checked)}
+                          className="w-4 h-4 accent-amber-600 rounded"
+                        />
+                        <span>🕌 15-Min Namaz Break</span>
+                      </label>
+
+                      <label className="flex items-center gap-1.5 cursor-pointer text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={driverPostTollsIncluded}
+                          onChange={(e) => setDriverPostTollsIncluded(e.target.checked)}
+                          className="w-4 h-4 accent-emerald-600 rounded"
+                        />
+                        <span>✅ Tolls Included</span>
+                      </label>
+
+                      <label className="flex items-center gap-1.5 cursor-pointer text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={driverPostIsReturnDeal}
+                          onChange={(e) => setDriverPostIsReturnDeal(e.target.checked)}
+                          className="w-4 h-4 accent-rose-600 rounded"
+                        />
+                        <span>🏷️ Khali Wapsi Deal</span>
+                      </label>
+                    </div>
+                  </div>
+
                   {/* Time and Notes */}
                   <div className="grid grid-cols-2 gap-2">
                     <div>
@@ -2819,7 +3979,7 @@ export default function Home() {
                               <button
                                 type="button"
                                 onClick={() => handleCancelPublishedRide(myRide)}
-                                className="text-[11px] bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-2.5 py-1 rounded-lg font-bold transition"
+                                className="text-[11px] bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-2.5 py-1 rounded-lg font-bold transition cursor-pointer"
                               >
                                 Cancel Ride
                               </button>
@@ -2871,7 +4031,11 @@ export default function Home() {
                           <p className="text-xs text-slate-600 mt-0.5">
                             Wants:{' '}
                             <strong className="text-slate-800">
-                              {req.bookingType === 'WHOLE_CAR' ? 'Entire Car' : `${req.requestedSeats} Seat(s)`}
+                              {req.bookingType === 'WHOLE_CAR'
+                                ? req.isRoundTrip
+                                  ? 'Entire Car (Round-Trip)'
+                                  : 'Entire Car'
+                                : `${req.requestedSeats} Seat(s)`}
                             </strong>{' '}
                             • <strong className="text-emerald-800">Rs. {req.totalPrice.toLocaleString()}</strong>
                           </p>
@@ -2945,7 +4109,7 @@ export default function Home() {
         )}
 
         {/* ========================================================================= */}
-        {/* TAB 4: PROFILE & SECURITY (DEDICATED SECTION) */}
+        {/* TAB 5: PROFILE & SECURITY (DEDICATED SECTION) */}
         {/* ========================================================================= */}
         {activeTab === 'profile' && (
           <div className="space-y-4">
@@ -2963,7 +4127,7 @@ export default function Home() {
                     )}
                   </div>
                   <p className="text-xs text-slate-500 font-bold">
-                    {currentUser.role === 'DRIVER' ? '🚘 Captain / Driver' : '🙋‍♂️ Passenger'} • {currentUser.city || 'Pakistan'}
+                    {currentUser.role === 'DRIVER' ? '🚘 Driver (ڈرائیور)' : '🙋‍♂️ Sawari / Passenger (سواری)'} • {currentUser.city || 'Pakistan'}
                   </p>
                   <p className="text-xs text-emerald-800 font-extrabold mt-0.5">
                     ✉️ {currentUser.email} • 📞 {currentUser.phone}
@@ -2997,7 +4161,7 @@ export default function Home() {
                           : 'bg-amber-100 text-amber-800'
                       }`}
                     >
-                      {currentUser.verificationStatus === 'VERIFIED' ? 'Verified Captain' : 'Under Review'}
+                      {currentUser.verificationStatus === 'VERIFIED' ? 'Verified Driver' : 'Under Review'}
                     </span>
                   </div>
 
@@ -3058,9 +4222,9 @@ export default function Home() {
                       handleDemoLogin('PASSENGER');
                     }
                   }}
-                  className="w-full bg-slate-900 hover:bg-black text-white font-bold text-xs py-3 rounded-xl transition text-center"
+                  className="w-full bg-slate-900 hover:bg-black text-white font-bold text-xs py-3 rounded-xl transition text-center cursor-pointer"
                 >
-                  Switch Role to {currentUser.role === 'PASSENGER' ? '🚘 Driver / Captain' : '🙋‍♂️ Passenger'}
+                  Switch Role to {currentUser.role === 'PASSENGER' ? '🚘 Driver (ڈرائیور)' : '🙋‍♂️ Sawari (سواری)'}
                 </button>
 
                 <button
@@ -3091,7 +4255,7 @@ export default function Home() {
                 </div>
                 <button
                   onClick={() => setShowQuickRouteModal(false)}
-                  className="text-slate-400 hover:text-slate-700 font-bold text-lg p-1"
+                  className="text-slate-400 hover:text-slate-700 font-bold text-lg p-1 cursor-pointer"
                 >
                   ✕
                 </button>
@@ -3211,6 +4375,360 @@ export default function Home() {
           </div>
         )}
 
+        {/* ========================================================================= */}
+        {/* MODAL: POST SAWARI REQUEST (ON SAWARI BOARD) */}
+        {/* ========================================================================= */}
+        {showPostRequestModal && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div>
+                  <h3 className="text-lg font-black text-slate-900 leading-tight flex items-center gap-2">
+                    <span>📢</span>
+                    <span>Post a Sawari Request</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium mt-0.5">
+                    سواری کی درخواست پوسٹ کریں • ڈرائیور آپ کو آفر دیں گے
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowPostRequestModal(false)}
+                  className="text-slate-400 hover:text-slate-700 font-bold text-lg p-1 cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <form onSubmit={handlePostSawariRequest} className="space-y-3.5">
+                {/* From & To Cities */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Departure City (From):
+                    </label>
+                    <select
+                      value={reqOrigin}
+                      onChange={(e) => setReqOrigin(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-bold text-slate-900"
+                    >
+                      {NATIONWIDE_CITIES.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Destination City (To):
+                    </label>
+                    <select
+                      value={reqDest}
+                      onChange={(e) => setReqDest(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-bold text-slate-900"
+                    >
+                      {NATIONWIDE_CITIES.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Date and Time */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Travel Date:
+                    </label>
+                    <input
+                      type="date"
+                      value={reqDate}
+                      onChange={(e) => setReqDate(e.target.value)}
+                      required
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-bold text-slate-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Desired Time:
+                    </label>
+                    <input
+                      type="text"
+                      value={reqTime}
+                      onChange={(e) => setReqTime(e.target.value)}
+                      placeholder="e.g. 08:30 AM"
+                      required
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-bold text-slate-900"
+                    />
+                  </div>
+                </div>
+
+                {/* Booking Type: Whole Car vs Seats */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Ride Type Needed:
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setReqBookingType('WHOLE_CAR')}
+                      className={`p-2.5 rounded-xl border text-left transition cursor-pointer ${
+                        reqBookingType === 'WHOLE_CAR'
+                          ? 'bg-emerald-700 text-white border-emerald-700 font-extrabold shadow-xs'
+                          : 'bg-slate-50 text-slate-700 border-slate-200 font-semibold'
+                      }`}
+                    >
+                      <span>🚗 Entire Car (Private)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setReqBookingType('SEAT')}
+                      className={`p-2.5 rounded-xl border text-left transition cursor-pointer ${
+                        reqBookingType === 'SEAT'
+                          ? 'bg-emerald-700 text-white border-emerald-700 font-extrabold shadow-xs'
+                          : 'bg-slate-50 text-slate-700 border-slate-200 font-semibold'
+                      }`}
+                    >
+                      <span>💺 Individual Seat(s)</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* If Seats, count */}
+                {reqBookingType === 'SEAT' && (
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Number of Seats:
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="6"
+                      value={reqSeatsCount}
+                      onChange={(e) => setReqSeatsCount(Number(e.target.value))}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-bold text-slate-900"
+                    />
+                  </div>
+                )}
+
+                {/* Preferences Toggles: Family Trip, AC, Round-Trip */}
+                <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+                  <span className="block text-[11px] font-extrabold uppercase text-slate-500">
+                    Preferences &amp; Modesty Requirements:
+                  </span>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <label className="flex items-center gap-1.5 cursor-pointer text-slate-800 font-bold">
+                      <input
+                        type="checkbox"
+                        checked={reqIsFamily}
+                        onChange={(e) => setReqIsFamily(e.target.checked)}
+                        className="w-4 h-4 accent-purple-600 rounded"
+                      />
+                      <span>👨‍👩‍👧 Family Trip (Family Safar)</span>
+                    </label>
+
+                    <label className="flex items-center gap-1.5 cursor-pointer text-slate-800 font-bold">
+                      <input
+                        type="checkbox"
+                        checked={reqAc}
+                        onChange={(e) => setReqAc(e.target.checked)}
+                        className="w-4 h-4 accent-cyan-600 rounded"
+                      />
+                      <span>❄️ AC Car Required</span>
+                    </label>
+
+                    <label className="flex items-center gap-1.5 cursor-pointer text-slate-800 font-bold">
+                      <input
+                        type="checkbox"
+                        checked={reqIsRoundTrip}
+                        onChange={(e) => setReqIsRoundTrip(e.target.checked)}
+                        className="w-4 h-4 accent-amber-600 rounded"
+                      />
+                      <span>🔄 Round-Trip Return Wanted</span>
+                    </label>
+                  </div>
+
+                  {reqIsRoundTrip && (
+                    <div className="pt-2">
+                      <label className="block text-[10px] font-bold text-slate-600 mb-1">
+                        Return Date:
+                      </label>
+                      <input
+                        type="date"
+                        value={reqReturnDate}
+                        onChange={(e) => setReqReturnDate(e.target.value)}
+                        className="w-full bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs font-bold text-slate-900"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Luggage Size */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Luggage Capacity Needed:
+                  </label>
+                  <select
+                    value={reqLuggage}
+                    onChange={(e) => setReqLuggage(e.target.value as 'CABIN_ONLY' | 'MEDIUM_SUITCASE' | 'FULL_TRUNK')}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-bold text-slate-900"
+                  >
+                    <option value="CABIN_ONLY">🎒 Cabin Only (Handbag / Backpack)</option>
+                    <option value="MEDIUM_SUITCASE">🧳 1-2 Medium Suitcases</option>
+                    <option value="FULL_TRUNK">🚗 Full Trunk Required (No CNG Cylinder)</option>
+                  </select>
+                </div>
+
+                {/* Budget Fare Input */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-bold text-slate-700">
+                      Your Budget Offer (Rs.):
+                    </label>
+                    <span className="text-[10px] text-emerald-700 font-bold">
+                      Cash to Driver
+                    </span>
+                  </div>
+                  <input
+                    type="number"
+                    value={reqBudget}
+                    onChange={(e) => setReqBudget(Number(e.target.value))}
+                    required
+                    className="w-full bg-slate-50 border-2 border-emerald-500 rounded-xl px-3 py-2.5 text-base font-black text-slate-900"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    Suggested benchmark: Rs. 10,000 - 15,000 for whole car intercity trips. Drivers can counter-offer if needed.
+                  </p>
+                </div>
+
+                {/* Notes */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Notes / Doorstep Pickup Landmark:
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={reqNotes}
+                    onChange={(e) => setReqNotes(e.target.value)}
+                    placeholder="e.g. Traveling with family & patients for hospital appointment. Need polite driver."
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div className="flex gap-2 pt-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setShowPostRequestModal(false)}
+                    className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-3 rounded-xl transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-3 rounded-xl shadow-xs transition cursor-pointer"
+                  >
+                    Post Request on Board ➔
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* MODAL: DRIVER CUSTOM OFFER */}
+        {/* ========================================================================= */}
+        {selectedReqForOffer && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl border border-slate-200">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                <div>
+                  <h3 className="text-base font-black text-slate-900 leading-tight">
+                    Submit Offer to {selectedReqForOffer.passengerName}
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {selectedReqForOffer.originName} ➔ {selectedReqForOffer.destinationName}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedReqForOffer(null)}
+                  className="text-slate-400 hover:text-slate-700 font-bold text-lg p-1 cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 text-xs space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Passenger Budget:</span>
+                  <span className="font-bold text-slate-900">Rs. {selectedReqForOffer.budgetPrice.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Type:</span>
+                  <span className="font-bold text-slate-900">
+                    {selectedReqForOffer.bookingType === 'WHOLE_CAR' ? 'Entire Car' : `${selectedReqForOffer.seatsCount} Seat(s)`}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Travel Date:</span>
+                  <span className="font-bold text-slate-900">{selectedReqForOffer.travelDate} ({selectedReqForOffer.desiredTime})</span>
+                </div>
+              </div>
+
+              <form onSubmit={handleSubmitDriverOffer} className="space-y-3 pt-1">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Your Offered Price (Rs.):
+                  </label>
+                  <input
+                    type="number"
+                    value={offerPrice}
+                    onChange={(e) => setOfferPrice(Number(e.target.value))}
+                    required
+                    className="w-full bg-white border-2 border-emerald-500 rounded-xl px-3 py-2 text-sm font-black text-slate-900"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    Direct cash collected from passenger upon boarding.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Message to Passenger:
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={offerMessage}
+                    onChange={(e) => setOfferMessage(e.target.value)}
+                    placeholder="e.g. Chilled AC, sanitized vehicle, respectful service, doorstep pickup."
+                    className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div className="flex gap-2 pt-1 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedReqForOffer(null)}
+                    className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-3 rounded-xl transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-3 rounded-xl shadow-xs transition cursor-pointer"
+                  >
+                    Send Offer ➔
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
         {/* MODAL: EMERGENCY CANCELLATION APPEAL */}
         {showAppealModal && selectedEventForAppeal && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
@@ -3227,7 +4745,7 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={() => setShowAppealModal(false)}
-                  className="text-slate-400 hover:text-slate-700 font-bold text-lg p-1"
+                  className="text-slate-400 hover:text-slate-700 font-bold text-lg p-1 cursor-pointer"
                 >
                   ✕
                 </button>
@@ -3272,13 +4790,13 @@ export default function Home() {
                   <button
                     type="button"
                     onClick={() => setShowAppealModal(false)}
-                    className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-3 rounded-xl transition"
+                    className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-3 rounded-xl transition cursor-pointer"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    className="flex-1 bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-3 rounded-xl shadow-xs transition"
+                    className="flex-1 bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-3 rounded-xl shadow-xs transition cursor-pointer"
                   >
                     Submit Appeal
                   </button>
@@ -3304,7 +4822,7 @@ export default function Home() {
             </a>
           </div>
           <p className="text-[11px] text-slate-400">
-            ReturnRide Pakistan © 2026 • Nationwide Intercity Marketplace • Direct Cash Pilot
+            Apni Sawari (اپنی سواری) © 2026 • Pakistan Nationwide Intercity Ride Network • Direct Cash Pilot
           </p>
         </footer>
       </main>
