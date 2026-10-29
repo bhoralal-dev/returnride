@@ -71,6 +71,7 @@ export interface AppUserProfile {
     capacity: number;
     hasAc: boolean;
     color: string;
+    imageUrl?: string;
   };
   cnicNumber?: string;
   licenseNumber?: string;
@@ -441,8 +442,23 @@ export default function Home() {
   const [selectedDropoffStop, setSelectedDropoffStop] = useState<string>('DEFAULT');
   const [customDropoffStop, setCustomDropoffStop] = useState<string>('');
 
-  // App Tabs: 'passenger' | 'all_listings' | 'sawari_board' | 'driver' | 'profile'
-  const [activeTab, setActiveTab] = useState<'passenger' | 'all_listings' | 'sawari_board' | 'driver' | 'profile'>('passenger');
+  // App Tabs: 'passenger' | 'all_listings' | 'sawari_board' | 'driver' | 'profile' | 'my_trips' | 'driver_post'
+  const [activeTab, setActiveTab] = useState<'passenger' | 'all_listings' | 'sawari_board' | 'driver' | 'profile' | 'my_trips' | 'driver_post'>('passenger');
+
+  // Profile Details & Image Customization State (Point 1: Users can add their details & images)
+  const [editName, setEditName] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editCity, setEditCity] = useState('Karachi');
+  const [editEmergency, setEditEmergency] = useState('');
+  const [editAvatarUrl, setEditAvatarUrl] = useState('');
+  const [editCnic, setEditCnic] = useState('');
+  const [editLicense, setEditLicense] = useState('');
+  const [editVehicleModel, setEditVehicleModel] = useState('Toyota Corolla GLi');
+  const [editVehiclePlate, setEditVehiclePlate] = useState('LEB-4592');
+  const [editVehicleCapacity, setEditVehicleCapacity] = useState(4);
+  const [editVehicleColor, setEditVehicleColor] = useState('White');
+  const [editVehicleAc, setEditVehicleAc] = useState(true);
+  const [editVehicleImageUrl, setEditVehicleImageUrl] = useState('');
 
   // "Where To?" Quick Route Popup for Passengers
   const [showQuickRouteModal, setShowQuickRouteModal] = useState(false);
@@ -602,6 +618,150 @@ export default function Home() {
       // Ignore
     }
   }, [currentUser, registeredUsers, rides, bookings, cancellationEvents, appeals, passengerRequests, isClientLoaded]);
+
+  // Synchronize profile editing inputs when current user changes
+  useEffect(() => {
+    if (currentUser) {
+      setEditName(currentUser.name || '');
+      setEditPhone(currentUser.phone || '');
+      setEditCity(currentUser.city || 'Karachi');
+      setEditEmergency(currentUser.emergencyContact || '');
+      setEditAvatarUrl(currentUser.avatarUrl || '');
+      setEditCnic(currentUser.cnicNumber || '');
+      setEditLicense(currentUser.licenseNumber || '');
+      if (currentUser.vehicle) {
+        setEditVehicleModel(currentUser.vehicle.makeModel || 'Toyota Corolla GLi');
+        setEditVehiclePlate(currentUser.vehicle.plate || 'LEB-4592');
+        setEditVehicleCapacity(currentUser.vehicle.capacity || 4);
+        setEditVehicleColor(currentUser.vehicle.color || 'White');
+        setEditVehicleAc(currentUser.vehicle.hasAc ?? true);
+        setEditVehicleImageUrl(currentUser.vehicle.imageUrl || '');
+      }
+    }
+  }, [currentUser]);
+
+  // Handle profile avatar upload (Converts file to base64 Data URL)
+  const handleAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2.5 * 1024 * 1024) {
+      setNotification({
+        type: 'error',
+        title: 'Image Too Large',
+        message: 'Please choose an image under 2.5MB.',
+      });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const res = reader.result as string;
+      setEditAvatarUrl(res);
+      setCurrentUser((prev) => (prev ? { ...prev, avatarUrl: res } : null));
+      setNotification({
+        type: 'success',
+        title: 'Profile Photo Loaded',
+        message: 'New photo selected. Click "Save Profile Changes" to save all details.',
+      });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Handle vehicle photo upload (Converts file to base64 Data URL)
+  const handleVehiclePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2.5 * 1024 * 1024) {
+      setNotification({
+        type: 'error',
+        title: 'Image Too Large',
+        message: 'Please choose an image under 2.5MB.',
+      });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const res = reader.result as string;
+      setEditVehicleImageUrl(res);
+      setNotification({
+        type: 'success',
+        title: 'Vehicle Photo Loaded',
+        message: 'Vehicle image selected. Click "Save Profile Changes" to save.',
+      });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Save profile changes
+  const handleSaveProfile = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser) return;
+    const updated: AppUserProfile = {
+      ...currentUser,
+      name: editName.trim() || currentUser.name,
+      phone: editPhone.trim() || currentUser.phone,
+      city: editCity || currentUser.city,
+      emergencyContact: editEmergency.trim() || currentUser.emergencyContact,
+      avatarUrl: editAvatarUrl || currentUser.avatarUrl,
+      cnicNumber: editCnic.trim() || currentUser.cnicNumber,
+      licenseNumber: editLicense.trim() || currentUser.licenseNumber,
+      vehicle: currentUser.role === 'DRIVER' || editVehicleModel ? {
+        makeModel: editVehicleModel.trim() || currentUser.vehicle?.makeModel || 'Toyota Corolla GLi',
+        plate: editVehiclePlate.trim() || currentUser.vehicle?.plate || 'LEB-4592',
+        capacity: Number(editVehicleCapacity) || 4,
+        color: editVehicleColor.trim() || currentUser.vehicle?.color || 'White',
+        hasAc: editVehicleAc,
+        imageUrl: editVehicleImageUrl || currentUser.vehicle?.imageUrl,
+      } : currentUser.vehicle,
+    };
+    setCurrentUser(updated);
+    setRegisteredUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
+    setNotification({
+      type: 'success',
+      title: 'Profile Details Saved!',
+      message: 'Your personal info, photos, and vehicle configuration have been saved.',
+    });
+  };
+
+  // Switch role seamlessly (Sawari vs Driver mode)
+  const handleSwitchRole = (newRole: 'PASSENGER' | 'DRIVER') => {
+    if (!currentUser) return;
+    const updatedUser: AppUserProfile = {
+      ...currentUser,
+      role: newRole,
+      vehicle: currentUser.vehicle || {
+        makeModel: 'Toyota Corolla GLi',
+        plate: 'LEB-4592',
+        capacity: 4,
+        hasAc: true,
+        color: 'White',
+      },
+      verificationStatus: currentUser.verificationStatus || (newRole === 'DRIVER' ? 'VERIFIED' : undefined),
+    };
+    setCurrentUser(updatedUser);
+    setRegisteredUsers((prev) => prev.map((u) => (u.id === updatedUser.id ? updatedUser : u)));
+    if (newRole === 'PASSENGER') {
+      setActiveTab('passenger');
+    } else {
+      setActiveTab('sawari_board');
+    }
+    setNotification({
+      type: 'info',
+      title: newRole === 'PASSENGER' ? 'Sawari (Passenger) Mode' : 'Driver (ڈرائیور) Mode',
+      message: newRole === 'PASSENGER'
+        ? 'Switched to Passenger view. Find rides, view trips, and post requests.'
+        : 'Switched to Driver mode. Review passenger requests, accept budgets, and post rides.',
+    });
+  };
+
+  // Cancel Sawari Request
+  const handleCancelSawariRequest = (requestId: string) => {
+    setPassengerRequests((prev) => prev.filter((r) => r.id !== requestId));
+    setNotification({
+      type: 'info',
+      title: 'Sawari Request Cancelled',
+      message: 'Your request has been removed from the board.',
+    });
+  };
 
   // Current User Evaluated Reliability Profile
   const userReliability = useMemo(() => {
@@ -1557,7 +1717,7 @@ export default function Home() {
     setSelectedRideId(newRide.id);
     setSearchOrigin(driverPostOrigin);
     setSearchDest(driverPostDest);
-    setActiveTab('all_listings');
+    setActiveTab('driver');
     setNotification({
       type: 'success',
       title: 'Journey Published!',
@@ -2099,7 +2259,8 @@ export default function Home() {
     <div className="min-h-screen bg-slate-100 text-slate-900 font-sans antialiased pb-24">
       {/* Top Header */}
       <header className="bg-emerald-800 text-white shadow-md sticky top-0 z-30">
-        <div className="max-w-xl mx-auto px-4 py-2.5 flex items-center justify-between">
+        <div className="max-w-xl mx-auto px-4 py-2.5 flex items-center justify-between gap-2">
+          {/* Brand Logo & Slogan */}
           <div className="flex items-center gap-2">
             <span className="text-2xl" role="img" aria-label="car">🚗</span>
             <div>
@@ -2108,102 +2269,197 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Profile Shortcut */}
-          <button
-            onClick={() => setActiveTab('profile')}
-            className="text-xs bg-emerald-950/60 hover:bg-emerald-950 text-emerald-100 hover:text-white px-3 py-1.5 rounded-xl border border-emerald-600/50 transition font-bold flex items-center gap-1.5 shadow-xs"
-          >
-            <span>{currentUser.avatarUrl || (currentUser.role === 'DRIVER' ? '👨‍✈️' : '🧑')}</span>
-            <span className="max-w-[70px] truncate sm:max-w-none">{currentUser.name}</span>
-            {currentUser.role === 'DRIVER' && currentUser.verificationStatus === 'VERIFIED' && (
-              <span className="text-amber-400 font-bold" title="Verified Driver">🛡️</span>
-            )}
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Role Switcher Pill (Point 2: Clear distinction between Sawari and Driver) */}
+            <div className="bg-emerald-950/70 p-1 rounded-2xl flex items-center border border-emerald-600/40">
+              <button
+                type="button"
+                onClick={() => handleSwitchRole('PASSENGER')}
+                className={`px-2.5 py-1 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer ${
+                  currentUser.role === 'PASSENGER'
+                    ? 'bg-white text-emerald-950 shadow-sm font-black'
+                    : 'text-emerald-200 hover:text-white'
+                }`}
+              >
+                <span>🙋‍♂️</span>
+                <span className="hidden sm:inline">Sawari</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSwitchRole('DRIVER')}
+                className={`px-2.5 py-1 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer ${
+                  currentUser.role === 'DRIVER'
+                    ? 'bg-white text-emerald-950 shadow-sm font-black'
+                    : 'text-emerald-200 hover:text-white'
+                }`}
+              >
+                <span>🚘</span>
+                <span className="hidden sm:inline">Driver</span>
+              </button>
+            </div>
+
+            {/* Profile Shortcut */}
+            <button
+              onClick={() => setActiveTab('profile')}
+              className="text-xs bg-emerald-950/60 hover:bg-emerald-950 text-emerald-100 hover:text-white px-2.5 py-1.5 rounded-xl border border-emerald-600/50 transition font-bold flex items-center gap-1.5 shadow-xs"
+              title="View & Edit Profile"
+            >
+              {currentUser.avatarUrl && (currentUser.avatarUrl.startsWith('data:image') || currentUser.avatarUrl.startsWith('http')) ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={currentUser.avatarUrl} alt="Avatar" className="w-5 h-5 rounded-full object-cover border border-white/50" />
+              ) : (
+                <span>{currentUser.avatarUrl || (currentUser.role === 'DRIVER' ? '👨‍✈️' : '🧑')}</span>
+              )}
+              <span className="max-w-[65px] truncate sm:max-w-none">{currentUser.name}</span>
+              {currentUser.role === 'DRIVER' && currentUser.verificationStatus === 'VERIFIED' && (
+                <span className="text-amber-400 font-bold" title="Verified Driver">🛡️</span>
+              )}
+            </button>
+          </div>
         </div>
 
-        {/* 5 Navigation Tabs */}
-        <div className="max-w-xl mx-auto px-2 grid grid-cols-5 gap-1 pb-2">
-          {/* Passenger Book Ride Tab */}
-          <button
-            onClick={() => {
-              setActiveTab('passenger');
-              setShowQuickRouteModal(true);
-            }}
-            className={`py-2 px-0.5 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-0.5 transition ${
-              activeTab === 'passenger'
-                ? 'bg-white text-emerald-900 shadow-md font-black'
-                : 'bg-emerald-900/60 text-emerald-100 hover:bg-emerald-900'
-            }`}
-          >
-            <span>🙋‍♂️</span>
-            <span>Book</span>
-          </button>
+        {/* Role-Specific Navigation Tabs (Point 2 & 4: Never mix driver and passenger tabs!) */}
+        <div className="max-w-xl mx-auto px-2 grid grid-cols-4 gap-1.5 pb-2">
+          {currentUser.role === 'PASSENGER' ? (
+            <>
+              {/* Sawari Tab 1: Book a Ride */}
+              <button
+                onClick={() => {
+                  setActiveTab('passenger');
+                  setShowQuickRouteModal(true);
+                }}
+                className={`py-2 px-1 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-0.5 transition cursor-pointer ${
+                  activeTab === 'passenger'
+                    ? 'bg-white text-emerald-900 shadow-md font-black'
+                    : 'bg-emerald-900/60 text-emerald-100 hover:bg-emerald-900'
+                }`}
+              >
+                <span>🔍</span>
+                <span>Book Ride</span>
+              </button>
 
-          {/* Shared All Listings Tab */}
-          <button
-            onClick={() => setActiveTab('all_listings')}
-            className={`py-2 px-0.5 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-0.5 transition ${
-              activeTab === 'all_listings'
-                ? 'bg-white text-emerald-900 shadow-md font-black'
-                : 'bg-emerald-900/60 text-emerald-100 hover:bg-emerald-900'
-            }`}
-          >
-            <span>📋</span>
-            <span>Rides ({rides.length})</span>
-          </button>
+              {/* Sawari Tab 2: Sawari Request Board */}
+              <button
+                onClick={() => setActiveTab('sawari_board')}
+                className={`py-2 px-1 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-0.5 transition relative cursor-pointer ${
+                  activeTab === 'sawari_board'
+                    ? 'bg-white text-emerald-900 shadow-md font-black'
+                    : 'bg-emerald-900/60 text-emerald-100 hover:bg-emerald-900'
+                }`}
+              >
+                <div className="relative">
+                  <span>📢</span>
+                  {openSawariRequestsCount > 0 && (
+                    <span className="absolute -top-1 -right-2 w-3.5 h-3.5 bg-amber-400 text-slate-900 text-[9px] font-black rounded-full flex items-center justify-center">
+                      {openSawariRequestsCount}
+                    </span>
+                  )}
+                </div>
+                <span>Board</span>
+              </button>
 
-          {/* Sawari Board (Reverse Marketplace) Tab */}
-          <button
-            onClick={() => setActiveTab('sawari_board')}
-            className={`py-2 px-0.5 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-0.5 transition relative ${
-              activeTab === 'sawari_board'
-                ? 'bg-white text-emerald-900 shadow-md font-black'
-                : 'bg-emerald-900/60 text-emerald-100 hover:bg-emerald-900'
-            }`}
-          >
-            <div className="relative">
-              <span>📢</span>
-              {openSawariRequestsCount > 0 && (
-                <span className="absolute -top-1 -right-2 w-3.5 h-3.5 bg-amber-400 text-slate-900 text-[9px] font-black rounded-full flex items-center justify-center">
-                  {openSawariRequestsCount}
-                </span>
-              )}
-            </div>
-            <span>Board</span>
-          </button>
+              {/* Sawari Tab 3: My Trips */}
+              <button
+                onClick={() => setActiveTab('my_trips')}
+                className={`py-2 px-1 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-0.5 transition relative cursor-pointer ${
+                  activeTab === 'my_trips'
+                    ? 'bg-white text-emerald-900 shadow-md font-black'
+                    : 'bg-emerald-900/60 text-emerald-100 hover:bg-emerald-900'
+                }`}
+              >
+                <div className="relative">
+                  <span>🎟️</span>
+                  {bookings.length > 0 && (
+                    <span className="absolute -top-1 -right-2 w-3.5 h-3.5 bg-emerald-300 text-slate-900 text-[9px] font-black rounded-full flex items-center justify-center">
+                      {bookings.length}
+                    </span>
+                  )}
+                </div>
+                <span>My Trips</span>
+              </button>
 
-          {/* Driver Portal Tab */}
-          <button
-            onClick={() => setActiveTab('driver')}
-            className={`py-2 px-0.5 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-0.5 transition relative ${
-              activeTab === 'driver'
-                ? 'bg-white text-emerald-900 shadow-md font-black'
-                : 'bg-emerald-900/60 text-emerald-100 hover:bg-emerald-900'
-            }`}
-          >
-            <div className="relative">
-              <span>🚘</span>
-              {pendingDriverBookingsCount > 0 && (
-                <span className="absolute -top-1 -right-2 w-3.5 h-3.5 bg-amber-400 text-slate-900 text-[9px] font-black rounded-full flex items-center justify-center">
-                  {pendingDriverBookingsCount}
-                </span>
-              )}
-            </div>
-            <span>Driver</span>
-          </button>
+              {/* Sawari Tab 4: Profile */}
+              <button
+                onClick={() => setActiveTab('profile')}
+                className={`py-2 px-1 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-0.5 transition cursor-pointer ${
+                  activeTab === 'profile'
+                    ? 'bg-white text-emerald-900 shadow-md font-black'
+                    : 'bg-emerald-900/60 text-emerald-100 hover:bg-emerald-900'
+                }`}
+              >
+                <span>👤</span>
+                <span>Profile</span>
+              </button>
+            </>
+          ) : (
+            <>
+              {/* Driver Tab 1: Sawari Board (Find Passengers) */}
+              <button
+                onClick={() => setActiveTab('sawari_board')}
+                className={`py-2 px-1 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-0.5 transition relative cursor-pointer ${
+                  activeTab === 'sawari_board'
+                    ? 'bg-white text-emerald-900 shadow-md font-black'
+                    : 'bg-emerald-900/60 text-emerald-100 hover:bg-emerald-900'
+                }`}
+              >
+                <div className="relative">
+                  <span>📢</span>
+                  {openSawariRequestsCount > 0 && (
+                    <span className="absolute -top-1 -right-2 w-3.5 h-3.5 bg-amber-400 text-slate-900 text-[9px] font-black rounded-full flex items-center justify-center">
+                      {openSawariRequestsCount}
+                    </span>
+                  )}
+                </div>
+                <span>Sawari Board</span>
+              </button>
 
-          {/* Profile & Verification Tab */}
-          <button
-            onClick={() => setActiveTab('profile')}
-            className={`py-2 px-0.5 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-0.5 transition ${
-              activeTab === 'profile'
-                ? 'bg-white text-emerald-900 shadow-md font-black'
-                : 'bg-emerald-900/60 text-emerald-100 hover:bg-emerald-900'
-            }`}
-          >
-            <span>👤</span>
-            <span>Profile</span>
-          </button>
+              {/* Driver Tab 2: Post Ride */}
+              <button
+                onClick={() => setActiveTab('driver_post')}
+                className={`py-2 px-1 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-0.5 transition cursor-pointer ${
+                  activeTab === 'driver_post'
+                    ? 'bg-white text-emerald-900 shadow-md font-black'
+                    : 'bg-emerald-900/60 text-emerald-100 hover:bg-emerald-900'
+                }`}
+              >
+                <span>➕</span>
+                <span>Post Ride</span>
+              </button>
+
+              {/* Driver Tab 3: My Rides & Bookings */}
+              <button
+                onClick={() => setActiveTab('driver')}
+                className={`py-2 px-1 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-0.5 transition relative cursor-pointer ${
+                  activeTab === 'driver'
+                    ? 'bg-white text-emerald-900 shadow-md font-black'
+                    : 'bg-emerald-900/60 text-emerald-100 hover:bg-emerald-900'
+                }`}
+              >
+                <div className="relative">
+                  <span>🚘</span>
+                  {pendingDriverBookingsCount > 0 && (
+                    <span className="absolute -top-1 -right-2 w-3.5 h-3.5 bg-amber-400 text-slate-900 text-[9px] font-black rounded-full flex items-center justify-center">
+                      {pendingDriverBookingsCount}
+                    </span>
+                  )}
+                </div>
+                <span>Rides & Bookings</span>
+              </button>
+
+              {/* Driver Tab 4: Driver & Vehicle Profile */}
+              <button
+                onClick={() => setActiveTab('profile')}
+                className={`py-2 px-1 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-0.5 transition cursor-pointer ${
+                  activeTab === 'profile'
+                    ? 'bg-white text-emerald-900 shadow-md font-black'
+                    : 'bg-emerald-900/60 text-emerald-100 hover:bg-emerald-900'
+                }`}
+              >
+                <span>🛡️</span>
+                <span>Vehicle Profile</span>
+              </button>
+            </>
+          )}
         </div>
       </header>
 
@@ -2846,102 +3102,172 @@ export default function Home() {
               </div>
             )}
 
-            {/* Passenger My Bookings */}
+            {/* Quick My Trips Callout if passenger has active bookings */}
             {bookings.length > 0 && (
-              <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 space-y-3">
-                <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
-                  <span>📋</span>
-                  <span>My Booking Requests ({bookings.length})</span>
-                </h3>
-
-                <div className="space-y-2.5">
-                  {bookings.map((b) => (
-                    <div
-                      key={b.id}
-                      className={`p-3.5 rounded-xl border transition ${
-                        b.status === 'ACCEPTED'
-                          ? 'bg-emerald-50/80 border-emerald-300'
-                          : b.status === 'PENDING'
-                          ? 'bg-amber-50/80 border-amber-300'
-                          : 'bg-slate-50 border-slate-200'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-black text-slate-900">
-                            {b.bookingType === 'WHOLE_CAR'
-                              ? b.isRoundTrip
-                                ? '🚗 Full Car • Round-Trip'
-                                : '🚗 Full Car Booking'
-                              : `💺 ${b.requestedSeats} Seat(s)`}
-                          </span>
-                          {b.isRoundTrip && (
-                            <span className="text-[10px] bg-amber-100 text-amber-900 font-bold px-1.5 py-0.2 rounded">
-                              🔄 Return Journey Included
-                            </span>
-                          )}
-                        </div>
-
-                        <span
-                          className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase ${
-                            b.status === 'ACCEPTED'
-                              ? 'bg-emerald-600 text-white'
-                              : b.status === 'PENDING'
-                              ? 'bg-amber-600 text-white'
-                              : 'bg-rose-600 text-white'
-                          }`}
-                        >
-                          {b.status === 'ACCEPTED' ? 'Confirmed' : b.status === 'PENDING' ? 'Waiting Driver' : b.status}
-                        </span>
-                      </div>
-
-                      <div className="text-xs text-slate-600 mt-1 flex justify-between">
-                        <span>Total: Rs. {b.totalPrice.toLocaleString()} (Cash)</span>
-                        <span className="text-[10px] text-slate-400">ID: {b.id}</span>
-                      </div>
-
-                      {b.dropoffStopName && (
-                        <div className="text-[11px] text-emerald-900 font-bold mt-1.5 bg-emerald-100/70 px-2 py-0.5 rounded-lg inline-flex items-center gap-1 border border-emerald-200">
-                          <span>📍</span>
-                          <span>Drop-off Destination: {b.dropoffStopName}</span>
-                        </div>
-                      )}
-
-                      {/* In-App Protection & Boarding Checkpoint */}
-                      {b.status === 'ACCEPTED' && (
-                        <div className="mt-2.5 pt-2 border-t border-emerald-200 space-y-2">
-                          <div className="bg-emerald-50 text-emerald-950 p-2.5 rounded-xl border border-emerald-300 text-xs flex items-start gap-2">
-                            <span className="text-base">🛡️</span>
-                            <div>
-                              <div className="font-extrabold text-[11px] uppercase tracking-wide text-emerald-900">
-                                Apni Sawari In-App Trip Protection Active
-                              </div>
-                              <p className="text-[11px] text-emerald-800 mt-0.5 leading-relaxed">
-                                All trip coordination is protected inside Apni Sawari to secure your fare and reliability score. External contact numbers are masked for passenger &amp; driver safety.
-                              </p>
-                            </div>
-                          </div>
-
-                          <div className="bg-white p-2.5 rounded-xl border border-slate-200 flex items-center justify-between text-xs">
-                            <span className="font-bold text-slate-700 flex items-center gap-1.5">
-                              <span>📍</span> Boarding Checkpoint:
-                            </span>
-                            <span className="font-extrabold text-slate-900">Designated Terminal Hub</span>
-                          </div>
-
-                          <div className="bg-emerald-100/60 p-2.5 rounded-xl border border-emerald-200 flex items-center justify-between text-xs">
-                            <span className="font-bold text-emerald-900 flex items-center gap-1.5">
-                              <span>💵</span> Cash Due on Boarding:
-                            </span>
-                            <span className="font-extrabold text-emerald-800 text-sm">
-                              Rs. {b.totalPrice.toLocaleString()} (Direct to Driver)
-                            </span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
+              <div
+                onClick={() => setActiveTab('my_trips')}
+                className="bg-white p-3.5 rounded-2xl border border-emerald-300 shadow-xs flex items-center justify-between cursor-pointer hover:bg-emerald-50 transition"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">🎟️</span>
+                  <div>
+                    <span className="text-xs font-black text-slate-900 block">
+                      You have {bookings.length} active booking(s)
+                    </span>
+                    <span className="text-[10px] text-emerald-800 font-bold">
+                      View booking confirmation &amp; boarding info in My Trips ➔
+                    </span>
+                  </div>
                 </div>
+                <span className="text-emerald-700 font-extrabold text-xs">Open ➔</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB: MY TRIPS & BOOKINGS (DEDICATED SECTION) */}
+        {/* ========================================================================= */}
+        {activeTab === 'my_trips' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                  <span>🎟️</span>
+                  <span>My Trips &amp; Bookings</span>
+                </h2>
+                <p className="text-xs text-slate-500">
+                  Track your reserved rides, driver coordination, and boarding checkpoints.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveTab('passenger')}
+                className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs py-2 px-3 rounded-xl transition cursor-pointer"
+              >
+                + Book New Ride
+              </button>
+            </div>
+
+            {bookings.length === 0 ? (
+              <div className="bg-white p-8 rounded-3xl border border-slate-200 text-center space-y-3">
+                <span className="text-4xl block">🎫</span>
+                <h3 className="text-base font-black text-slate-800">No Trips Booked Yet</h3>
+                <p className="text-xs text-slate-500 max-w-xs mx-auto">
+                  When you book an entire car or seats, your journey details, driver contact, and OTP security appear here.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('passenger')}
+                  className="bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-2.5 px-4 rounded-xl transition cursor-pointer"
+                >
+                  Find a Ride Now
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {bookings.map((b) => (
+                  <div
+                    key={b.id}
+                    className={`bg-white p-5 rounded-3xl border transition shadow-sm space-y-3 ${
+                      b.status === 'ACCEPTED'
+                        ? 'border-emerald-300'
+                        : b.status === 'PENDING'
+                        ? 'border-amber-300'
+                        : 'border-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-black text-slate-900">
+                          {b.bookingType === 'WHOLE_CAR'
+                            ? b.isRoundTrip
+                              ? '🚗 Entire Car • Round-Trip'
+                              : '🚗 Entire Car Booking'
+                            : `💺 ${b.requestedSeats} Seat(s)`}
+                        </span>
+                        {b.isRoundTrip && (
+                          <span className="text-[10px] bg-amber-100 text-amber-900 font-bold px-2 py-0.5 rounded-full">
+                            🔄 Return Journey Included
+                          </span>
+                        )}
+                      </div>
+
+                      <span
+                        className={`text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase ${
+                          b.status === 'ACCEPTED'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : b.status === 'PENDING'
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-rose-100 text-rose-800'
+                        }`}
+                      >
+                        {b.status === 'ACCEPTED' ? '✓ Confirmed by Driver' : b.status === 'PENDING' ? '⏳ Awaiting Driver' : b.status}
+                      </span>
+                    </div>
+
+                    <div className="text-xs text-slate-600 flex justify-between items-center bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                      <div>
+                        <span className="text-slate-400 block text-[10px] uppercase font-bold">Fare Due:</span>
+                        <span className="font-extrabold text-sm text-emerald-900">Rs. {b.totalPrice.toLocaleString()} (Cash)</span>
+                      </div>
+                      <span className="text-[10px] text-slate-400 font-mono">ID: {b.id}</span>
+                    </div>
+
+                    {b.dropoffStopName && (
+                      <div className="text-xs text-emerald-900 font-bold bg-emerald-50 px-3 py-1.5 rounded-xl inline-flex items-center gap-1.5 border border-emerald-200">
+                        <span>📍</span>
+                        <span>Drop-off Destination: {b.dropoffStopName}</span>
+                      </div>
+                    )}
+
+                    {/* In-App Protection & Boarding Checkpoint */}
+                    {b.status === 'ACCEPTED' && (
+                      <div className="pt-2 border-t border-slate-100 space-y-2">
+                        <div className="bg-emerald-50 text-emerald-950 p-3 rounded-2xl border border-emerald-300 text-xs flex items-start gap-2.5">
+                          <span className="text-base">🛡️</span>
+                          <div>
+                            <div className="font-black text-[11px] uppercase tracking-wide text-emerald-900">
+                              Apni Sawari In-App Trip Protection Active
+                            </div>
+                            <p className="text-[11px] text-emerald-800 mt-0.5 leading-relaxed">
+                              All trip coordination is protected inside Apni Sawari to secure your fare and reliability score. External contact numbers are masked for passenger &amp; driver safety.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="bg-white p-3 rounded-2xl border border-slate-200 flex items-center justify-between text-xs">
+                          <span className="font-bold text-slate-700 flex items-center gap-1.5">
+                            <span>📍</span> Boarding Checkpoint:
+                          </span>
+                          <span className="font-extrabold text-slate-900">Designated Terminal Hub</span>
+                        </div>
+
+                        <div className="bg-emerald-100/60 p-3 rounded-2xl border border-emerald-200 flex items-center justify-between text-xs">
+                          <span className="font-bold text-emerald-900 flex items-center gap-1.5">
+                            <span>💵</span> Cash Due on Boarding:
+                          </span>
+                          <span className="font-extrabold text-emerald-800 text-sm">
+                            Rs. {b.totalPrice.toLocaleString()} (Direct to Driver)
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Cancellation Action */}
+                    {(b.status === 'PENDING' || b.status === 'ACCEPTED') && (
+                      <div className="pt-2 border-t border-slate-100 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => handleCancelBooking(b)}
+                          className="text-xs text-rose-600 hover:text-rose-800 font-bold hover:underline cursor-pointer"
+                        >
+                          Cancel Booking
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -3384,6 +3710,12 @@ export default function Home() {
                           <span className="text-base font-black text-slate-900">{req.originName}</span>
                           <span className="text-emerald-700 font-bold">➔</span>
                           <span className="text-base font-black text-slate-900">{req.destinationName}</span>
+                          {isOwner && (
+                            <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 font-extrabold text-[10px] px-2 py-0.5 rounded-full flex items-center gap-0.5">
+                              <span>🏷️</span>
+                              <span>Your Request</span>
+                            </span>
+                          )}
                         </div>
 
                         <span
@@ -3473,51 +3805,74 @@ export default function Home() {
                           </span>
                         </div>
 
-                        {/* Driver Action Buttons */}
-                        {isDriver && req.status === 'OPEN' && (
+                        {/* Action Buttons (Point 2: Users cannot accept their own request; drivers act only on others' requests) */}
+                        {isOwner ? (
                           <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const defaultOffer: DriverOffer = {
-                                  id: generateClientUniqueId('off'),
-                                  driverId: currentUser.id,
-                                  driverName: currentUser.name,
-                                  driverPhone: currentUser.phone,
-                                  driverRating: 4.9,
-                                  driverTier: 'TOP_RATED_DRIVER',
-                                  vehicleMakeModel: currentUser.vehicle?.makeModel || 'Toyota Corolla GLi',
-                                  vehiclePlate: currentUser.vehicle?.plate || 'LEB-4592',
-                                  offeredPrice: req.budgetPrice,
-                                  message: 'Accepted at your budget. Clean AC car ready for family.',
-                                  createdAt: new Date().toISOString(),
-                                };
-                                setPassengerRequests((prev) =>
-                                  prev.map((r) =>
-                                    r.id === req.id ? { ...r, offers: [...r.offers, defaultOffer] } : r
-                                  )
-                                );
-                                setNotification({
-                                  type: 'success',
-                                  title: 'Offer Sent at Passenger Budget!',
-                                  message: `You offered Rs. ${req.budgetPrice.toLocaleString()} to ${req.passengerName}.`,
-                                });
-                              }}
-                              className="bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-2 px-3 rounded-xl transition shadow-xs flex items-center gap-1 cursor-pointer"
-                            >
-                              <span>⚡</span>
-                              <span>Accept Budget</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => handleOpenOfferModal(req)}
-                              className="bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 font-bold text-xs py-2 px-3 rounded-xl transition cursor-pointer"
-                            >
-                              Send Custom Offer
-                            </button>
+                            <span className="text-[11px] text-slate-500 font-medium">
+                              {req.offers.length === 0 ? '⏳ Awaiting Driver Offers' : `💬 ${req.offers.length} Offer(s) Available`}
+                            </span>
+                            {req.status === 'OPEN' && (
+                              <button
+                                type="button"
+                                onClick={() => handleCancelSawariRequest(req.id)}
+                                className="text-xs text-rose-600 hover:text-rose-800 font-bold hover:underline cursor-pointer bg-rose-50 px-2.5 py-1 rounded-lg border border-rose-200"
+                              >
+                                Cancel Request
+                              </button>
+                            )}
                           </div>
-                        )}
+                        ) : isDriver && req.status === 'OPEN' ? (
+                          <div className="flex items-center gap-2">
+                            {req.offers.some((o) => o.driverId === currentUser.id) ? (
+                              <span className="text-xs font-bold text-emerald-800 bg-emerald-100 border border-emerald-300 px-3 py-1.5 rounded-xl">
+                                ✓ Offer Already Submitted
+                              </span>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const defaultOffer: DriverOffer = {
+                                      id: generateClientUniqueId('off'),
+                                      driverId: currentUser.id,
+                                      driverName: currentUser.name,
+                                      driverPhone: currentUser.phone,
+                                      driverRating: 4.9,
+                                      driverTier: 'TOP_RATED_DRIVER',
+                                      vehicleMakeModel: currentUser.vehicle?.makeModel || 'Toyota Corolla GLi',
+                                      vehiclePlate: currentUser.vehicle?.plate || 'LEB-4592',
+                                      offeredPrice: req.budgetPrice,
+                                      message: 'Accepted at your budget. Clean AC car ready for family.',
+                                      createdAt: new Date().toISOString(),
+                                    };
+                                    setPassengerRequests((prev) =>
+                                      prev.map((r) =>
+                                        r.id === req.id ? { ...r, offers: [...r.offers, defaultOffer] } : r
+                                      )
+                                    );
+                                    setNotification({
+                                      type: 'success',
+                                      title: 'Offer Sent at Passenger Budget!',
+                                      message: `You offered Rs. ${req.budgetPrice.toLocaleString()} to ${req.passengerName}.`,
+                                    });
+                                  }}
+                                  className="bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-2 px-3 rounded-xl transition shadow-xs flex items-center gap-1 cursor-pointer"
+                                >
+                                  <span>⚡</span>
+                                  <span>Accept Budget</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenOfferModal(req)}
+                                  className="bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 font-bold text-xs py-2 px-3 rounded-xl transition cursor-pointer"
+                                >
+                                  Send Custom Offer
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        ) : null}
                       </div>
 
                       {/* Offers List (Visible to Passenger & Driver) */}
@@ -3598,7 +3953,261 @@ export default function Home() {
         )}
 
         {/* ========================================================================= */}
-        {/* TAB 4: DRIVER PORTAL */}
+        {/* TAB 4A: DRIVER POST RIDE (DEDICATED SECTION) */}
+        {/* ========================================================================= */}
+        {activeTab === 'driver_post' && (
+          <div className="space-y-4">
+            <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-200 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-black text-slate-900 flex items-center gap-1.5">
+                    <span>➕</span>
+                    <span>List an Intercity Journey / Return Deal</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Publish your empty seats or full car for verified passengers across Pakistan.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('driver')}
+                  className="text-xs text-slate-500 hover:text-slate-800 font-bold"
+                >
+                  View My Rides ➔
+                </button>
+              </div>
+
+              <form onSubmit={handlePublishDriverRide} className="space-y-3.5 pt-1">
+                {/* From & To */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">Departure City (From)</label>
+                    <select
+                      value={driverPostOrigin}
+                      onChange={(e) => setDriverPostOrigin(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:border-emerald-600"
+                    >
+                      {NATIONWIDE_CITIES.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">Arrival City (To)</label>
+                    <select
+                      value={driverPostDest}
+                      onChange={(e) => setDriverPostDest(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:border-emerald-600"
+                    >
+                      {NATIONWIDE_CITIES.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Booking Option */}
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                    Booking Option Offered:
+                  </label>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setDriverPostMode('WHOLE_CAR_OR_SEATS')}
+                      className={`py-2 px-1 text-center rounded-xl text-xs font-bold border transition cursor-pointer ${
+                        driverPostMode === 'WHOLE_CAR_OR_SEATS'
+                          ? 'bg-slate-900 text-white border-slate-900'
+                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      Both Options
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDriverPostMode('WHOLE_CAR')}
+                      className={`py-2 px-1 text-center rounded-xl text-xs font-bold border transition cursor-pointer ${
+                        driverPostMode === 'WHOLE_CAR'
+                          ? 'bg-slate-900 text-white border-slate-900'
+                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      Full Car Only
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDriverPostMode('SEATS')}
+                      className={`py-2 px-1 text-center rounded-xl text-xs font-bold border transition cursor-pointer ${
+                        driverPostMode === 'SEATS'
+                          ? 'bg-slate-900 text-white border-slate-900'
+                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      Seats Only
+                    </button>
+                  </div>
+                </div>
+
+                {/* Pricing Fields */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">Whole Car Price (Rs.)</label>
+                    <input
+                      type="number"
+                      value={driverPostCarPrice}
+                      onChange={(e) => setDriverPostCarPrice(Number(e.target.value))}
+                      required
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:border-emerald-600"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">Price Per Seat (Rs.)</label>
+                    <input
+                      type="number"
+                      value={driverPostSeatPrice}
+                      onChange={(e) => setDriverPostSeatPrice(Number(e.target.value))}
+                      disabled={driverPostMode === 'WHOLE_CAR'}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-semibold disabled:bg-slate-100 disabled:text-slate-400 focus:outline-none focus:border-emerald-600"
+                    />
+                  </div>
+                </div>
+
+                {/* Round Trip Package for Entire Car */}
+                {driverPostMode !== 'SEATS' && (
+                  <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={driverPostRoundTripAllowed}
+                          onChange={(e) => setDriverPostRoundTripAllowed(e.target.checked)}
+                          className="w-4 h-4 accent-emerald-600 rounded"
+                        />
+                        <span>Allow Round-Trip Full Car (Same Driver Return)</span>
+                      </label>
+                    </div>
+
+                    {driverPostRoundTripAllowed && (
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                          Discounted Round-Trip Full Car Package Fare (Rs.)
+                        </label>
+                        <input
+                          type="number"
+                          value={driverPostRoundTripPrice}
+                          onChange={(e) => setDriverPostRoundTripPrice(Number(e.target.value))}
+                          className="w-full bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs font-semibold focus:outline-none focus:border-emerald-600"
+                        />
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                          Discounted package fare when driver waits at destination for family or same-day return.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Trust & Comfort Toggles */}
+                <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+                  <span className="block text-[11px] font-extrabold uppercase text-slate-500">
+                    Cultural &amp; Travel Comfort Badges:
+                  </span>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <label className="flex items-center gap-1.5 cursor-pointer text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={driverPostFamilyOnboard}
+                        onChange={(e) => setDriverPostFamilyOnboard(e.target.checked)}
+                        className="w-4 h-4 accent-emerald-600 rounded"
+                      />
+                      <span>👨‍👩‍👧 Family Traveling</span>
+                    </label>
+
+                    <label className="flex items-center gap-1.5 cursor-pointer text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={driverPostLadiesOnly}
+                        onChange={(e) => setDriverPostLadiesOnly(e.target.checked)}
+                        className="w-4 h-4 accent-purple-600 rounded"
+                      />
+                      <span>🧕 Ladies Only Seats</span>
+                    </label>
+
+                    <label className="flex items-center gap-1.5 cursor-pointer text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={driverPostNamazBreak}
+                        onChange={(e) => setDriverPostNamazBreak(e.target.checked)}
+                        className="w-4 h-4 accent-amber-600 rounded"
+                      />
+                      <span>🕌 15-Min Namaz Break</span>
+                    </label>
+
+                    <label className="flex items-center gap-1.5 cursor-pointer text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={driverPostTollsIncluded}
+                        onChange={(e) => setDriverPostTollsIncluded(e.target.checked)}
+                        className="w-4 h-4 accent-emerald-600 rounded"
+                      />
+                      <span>✅ Tolls Included</span>
+                    </label>
+
+                    <label className="flex items-center gap-1.5 cursor-pointer text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={driverPostIsReturnDeal}
+                        onChange={(e) => setDriverPostIsReturnDeal(e.target.checked)}
+                        className="w-4 h-4 accent-rose-600 rounded"
+                      />
+                      <span>🏷️ Khali Wapsi Deal</span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Time and Notes */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">Departure Time</label>
+                    <input
+                      type="text"
+                      value={driverPostTime}
+                      onChange={(e) => setDriverPostTime(e.target.value)}
+                      placeholder="07:00 AM"
+                      required
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:border-emerald-600"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">Trip Details &amp; Notes</label>
+                    <input
+                      type="text"
+                      value={driverPostNotes}
+                      onChange={(e) => setDriverPostNotes(e.target.value)}
+                      placeholder="Luggage space, Chilled AC"
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:border-emerald-600"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-extrabold text-xs py-3.5 rounded-2xl shadow-sm transition cursor-pointer"
+                >
+                  Publish Ride Online (Passengers Can Book)
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB 4B: DRIVER PORTAL & INCOMING BOOKINGS */}
         {/* ========================================================================= */}
         {activeTab === 'driver' && (
           <div className="space-y-4">
@@ -3626,12 +4235,20 @@ export default function Home() {
                       {currentUser.vehicle?.plate} • {currentUser.vehicle?.capacity} Seats
                     </p>
                   </div>
-                  <button
-                    onClick={() => setActiveTab('profile')}
-                    className="text-xs text-emerald-700 font-extrabold hover:underline"
-                  >
-                    View Documents
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setActiveTab('driver_post')}
+                      className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs py-1.5 px-3 rounded-xl transition shadow-xs cursor-pointer"
+                    >
+                      + Post Ride
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('profile')}
+                      className="text-xs text-emerald-700 font-extrabold hover:underline"
+                    >
+                      Profile
+                    </button>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -3641,306 +4258,11 @@ export default function Home() {
                   To list rides and earn as a driver, please register as a Driver or switch to demo driver account.
                 </p>
                 <button
-                  onClick={() => {
-                    handleDemoLogin('DRIVER');
-                  }}
+                  onClick={() => handleSwitchRole('DRIVER')}
                   className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs py-2 px-3 rounded-xl transition"
                 >
-                  Switch to Driver Account
+                  Switch to Driver Mode
                 </button>
-              </div>
-            )}
-
-            {/* Nearby Sawari Darkhwast for this Driver */}
-            {currentUser.role === 'DRIVER' && (
-              <div className="bg-gradient-to-r from-amber-500/10 via-emerald-500/10 to-teal-500/10 p-4 rounded-3xl border border-emerald-300 shadow-xs space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xl">📢</span>
-                    <h3 className="text-sm font-black text-slate-900">
-                      Nearby Sawari Requests in Your Area
-                    </h3>
-                  </div>
-                  <button
-                    onClick={() => setActiveTab('sawari_board')}
-                    className="text-xs text-emerald-800 font-extrabold hover:underline"
-                  >
-                    Open Sawari Board ({openSawariRequestsCount}) ➔
-                  </button>
-                </div>
-                <p className="text-xs text-slate-600">
-                  Passengers actively seeking rides in or near {currentUser.city || 'your area'}. Accept directly at their budget or send custom offers:
-                </p>
-
-                <div className="space-y-2">
-                  {passengerRequests
-                    .filter((r) => r.status === 'OPEN')
-                    .slice(0, 3)
-                    .map((nearReq) => (
-                      <div
-                        key={nearReq.id}
-                        className="p-3 bg-white rounded-2xl border border-slate-200 shadow-2xs flex items-center justify-between text-xs"
-                      >
-                        <div>
-                          <div className="font-extrabold text-slate-900 flex items-center gap-1.5">
-                            <span>{nearReq.originName} ➔ {nearReq.destinationName}</span>
-                            {nearReq.isFamilyTrip && (
-                              <span className="text-[10px] bg-purple-100 text-purple-900 px-1.5 py-0.2 rounded font-bold">
-                                👨‍👩‍👧 Family
-                              </span>
-                            )}
-                          </div>
-                          <span className="text-[11px] text-slate-500">
-                            {nearReq.travelDate} ({nearReq.desiredTime}) • Budget: <strong className="text-emerald-800 font-bold">Rs. {nearReq.budgetPrice.toLocaleString()}</strong> ({nearReq.bookingType === 'WHOLE_CAR' ? 'Full Car' : `${nearReq.seatsCount} Seats`})
-                          </span>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => handleOpenOfferModal(nearReq)}
-                          className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs py-1.5 px-3 rounded-xl transition shadow-xs cursor-pointer shrink-0"
-                        >
-                          Send Offer
-                        </button>
-                      </div>
-                    ))}
-                </div>
-              </div>
-            )}
-
-            {/* Publish Ride Card */}
-            {currentUser.role === 'DRIVER' && (
-              <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 space-y-3">
-                <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-1.5">
-                  <span>➕</span>
-                  <span>List a New Intercity Journey</span>
-                </h3>
-
-                <form onSubmit={handlePublishDriverRide} className="space-y-3 pt-1">
-                  {/* From & To */}
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-600 mb-1">Departure (From)</label>
-                      <select
-                        value={driverPostOrigin}
-                        onChange={(e) => setDriverPostOrigin(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-semibold"
-                      >
-                        {NATIONWIDE_CITIES.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-600 mb-1">Arrival (To)</label>
-                      <select
-                        value={driverPostDest}
-                        onChange={(e) => setDriverPostDest(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-semibold"
-                      >
-                        {NATIONWIDE_CITIES.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  {/* Booking Option */}
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                      Booking Option Offered:
-                    </label>
-                    <div className="grid grid-cols-3 gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setDriverPostMode('WHOLE_CAR_OR_SEATS')}
-                        className={`py-2 px-1 text-center rounded-xl text-xs font-bold border transition ${
-                          driverPostMode === 'WHOLE_CAR_OR_SEATS'
-                            ? 'bg-slate-900 text-white border-slate-900'
-                            : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                        }`}
-                      >
-                        Both Options
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDriverPostMode('WHOLE_CAR')}
-                        className={`py-2 px-1 text-center rounded-xl text-xs font-bold border transition ${
-                          driverPostMode === 'WHOLE_CAR'
-                            ? 'bg-slate-900 text-white border-slate-900'
-                            : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                        }`}
-                      >
-                        Full Car Only
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDriverPostMode('SEATS')}
-                        className={`py-2 px-1 text-center rounded-xl text-xs font-bold border transition ${
-                          driverPostMode === 'SEATS'
-                            ? 'bg-slate-900 text-white border-slate-900'
-                            : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                        }`}
-                      >
-                        Seats Only
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Pricing Fields */}
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-600 mb-1">Whole Car Price (Rs.)</label>
-                      <input
-                        type="number"
-                        value={driverPostCarPrice}
-                        onChange={(e) => setDriverPostCarPrice(Number(e.target.value))}
-                        required
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-semibold"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-600 mb-1">Price Per Seat (Rs.)</label>
-                      <input
-                        type="number"
-                        value={driverPostSeatPrice}
-                        onChange={(e) => setDriverPostSeatPrice(Number(e.target.value))}
-                        disabled={driverPostMode === 'WHOLE_CAR'}
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-semibold disabled:bg-slate-100 disabled:text-slate-400"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Round Trip Package for Entire Car */}
-                  {driverPostMode !== 'SEATS' && (
-                    <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={driverPostRoundTripAllowed}
-                            onChange={(e) => setDriverPostRoundTripAllowed(e.target.checked)}
-                            className="w-4 h-4 accent-emerald-600 rounded"
-                          />
-                          <span>Allow Round-Trip Full Car (Same Driver Return)</span>
-                        </label>
-                      </div>
-
-                      {driverPostRoundTripAllowed && (
-                        <div>
-                          <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                            Discounted Round-Trip Full Car Package Fare (Rs.)
-                          </label>
-                          <input
-                            type="number"
-                            value={driverPostRoundTripPrice}
-                            onChange={(e) => setDriverPostRoundTripPrice(Number(e.target.value))}
-                            className="w-full bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs font-semibold"
-                          />
-                          <p className="text-[10px] text-slate-400 mt-0.5">
-                            Typically discounted 30-40% compared to two separate trips (e.g. driver waits at destination).
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Trust & Comfort Toggles */}
-                  <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
-                    <span className="block text-[11px] font-extrabold uppercase text-slate-500">
-                      Cultural &amp; Travel Comfort Badges:
-                    </span>
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <label className="flex items-center gap-1.5 cursor-pointer text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={driverPostFamilyOnboard}
-                          onChange={(e) => setDriverPostFamilyOnboard(e.target.checked)}
-                          className="w-4 h-4 accent-emerald-600 rounded"
-                        />
-                        <span>👨‍👩‍👧 Family Traveling</span>
-                      </label>
-
-                      <label className="flex items-center gap-1.5 cursor-pointer text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={driverPostLadiesOnly}
-                          onChange={(e) => setDriverPostLadiesOnly(e.target.checked)}
-                          className="w-4 h-4 accent-purple-600 rounded"
-                        />
-                        <span>🧕 Ladies Only Seats</span>
-                      </label>
-
-                      <label className="flex items-center gap-1.5 cursor-pointer text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={driverPostNamazBreak}
-                          onChange={(e) => setDriverPostNamazBreak(e.target.checked)}
-                          className="w-4 h-4 accent-amber-600 rounded"
-                        />
-                        <span>🕌 15-Min Namaz Break</span>
-                      </label>
-
-                      <label className="flex items-center gap-1.5 cursor-pointer text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={driverPostTollsIncluded}
-                          onChange={(e) => setDriverPostTollsIncluded(e.target.checked)}
-                          className="w-4 h-4 accent-emerald-600 rounded"
-                        />
-                        <span>✅ Tolls Included</span>
-                      </label>
-
-                      <label className="flex items-center gap-1.5 cursor-pointer text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={driverPostIsReturnDeal}
-                          onChange={(e) => setDriverPostIsReturnDeal(e.target.checked)}
-                          className="w-4 h-4 accent-rose-600 rounded"
-                        />
-                        <span>🏷️ Khali Wapsi Deal</span>
-                      </label>
-                    </div>
-                  </div>
-
-                  {/* Time and Notes */}
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-600 mb-1">Departure Time</label>
-                      <input
-                        type="text"
-                        value={driverPostTime}
-                        onChange={(e) => setDriverPostTime(e.target.value)}
-                        placeholder="07:00 AM"
-                        required
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-semibold"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-600 mb-1">Trip Details & Route Notes</label>
-                      <input
-                        type="text"
-                        value={driverPostNotes}
-                        onChange={(e) => setDriverPostNotes(e.target.value)}
-                        placeholder="Luggage space, AC"
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-xs font-semibold"
-                      />
-                    </div>
-                  </div>
-
-                  <button
-                    type="submit"
-                    className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-extrabold text-xs py-3.5 rounded-xl shadow-xs transition cursor-pointer"
-                  >
-                    Publish Ride Online (Passengers Can Book)
-                  </button>
-                </form>
               </div>
             )}
 
@@ -4109,129 +4431,283 @@ export default function Home() {
         )}
 
         {/* ========================================================================= */}
-        {/* TAB 5: PROFILE & SECURITY (DEDICATED SECTION) */}
+        {/* TAB 5: PROFILE & VEHICLE SETTINGS (INTERACTIVE CUSTOMIZER) */}
         {/* ========================================================================= */}
         {activeTab === 'profile' && (
           <div className="space-y-4">
-            {/* User Profile Card */}
-            <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-200 space-y-4">
-              <div className="flex items-center gap-4">
-                <div className="w-16 h-16 rounded-full bg-emerald-100 border-2 border-emerald-300 flex items-center justify-center text-3xl shadow-xs">
-                  {currentUser.avatarUrl || '🧑'}
-                </div>
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <h2 className="text-lg font-black text-slate-900">{currentUser.name}</h2>
-                    {currentUser.role === 'DRIVER' && currentUser.verificationStatus === 'VERIFIED' && (
-                      <span className="text-amber-500 font-bold text-base" title="Verified Driver">🛡️</span>
-                    )}
+            <form onSubmit={handleSaveProfile} className="space-y-4">
+              {/* User Profile Card */}
+              <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-200 space-y-4">
+                <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4">
+                  {/* Avatar Preview */}
+                  <div className="relative group shrink-0">
+                    <div className="w-20 h-20 rounded-full bg-emerald-100 border-2 border-emerald-400 flex items-center justify-center text-4xl shadow-xs overflow-hidden">
+                      {editAvatarUrl && (editAvatarUrl.startsWith('data:image') || editAvatarUrl.startsWith('http')) ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={editAvatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                      ) : (
+                        <span>{editAvatarUrl || (currentUser.role === 'DRIVER' ? '👨‍✈️' : '🧑')}</span>
+                      )}
+                    </div>
                   </div>
-                  <p className="text-xs text-slate-500 font-bold">
-                    {currentUser.role === 'DRIVER' ? '🚘 Driver (ڈرائیور)' : '🙋‍♂️ Sawari / Passenger (سواری)'} • {currentUser.city || 'Pakistan'}
-                  </p>
-                  <p className="text-xs text-emerald-800 font-extrabold mt-0.5">
-                    ✉️ {currentUser.email} • 📞 {currentUser.phone}
-                  </p>
+
+                  <div className="flex-1 text-center sm:text-left space-y-2">
+                    <div>
+                      <div className="flex items-center justify-center sm:justify-start gap-1.5">
+                        <h2 className="text-lg font-black text-slate-900">{currentUser.name}</h2>
+                        {currentUser.role === 'DRIVER' && currentUser.verificationStatus === 'VERIFIED' && (
+                          <span className="text-amber-500 font-bold" title="Verified Driver">🛡️</span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-500 font-bold">
+                        {currentUser.role === 'DRIVER' ? '🚘 Registered Driver (ڈرائیور)' : '🙋‍♂️ Verified Sawari (سواری)'} • {currentUser.city || 'Pakistan'}
+                      </p>
+                    </div>
+
+                    {/* Image Upload Button & Emoji Avatars */}
+                    <div className="pt-1 flex flex-wrap items-center justify-center sm:justify-start gap-2">
+                      <label className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs py-1.5 px-3 rounded-xl transition cursor-pointer shadow-xs inline-flex items-center gap-1.5">
+                        <span>📷</span>
+                        <span>Upload Photo</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleAvatarFileChange}
+                          className="hidden"
+                        />
+                      </label>
+
+                      {/* Quick Emoji Avatars */}
+                      <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+                        {['👨‍💼', '👩‍💼', '👨‍✈️', '🧕', '🧔', '🧑'].map((avatarEmoji) => (
+                          <button
+                            key={avatarEmoji}
+                            type="button"
+                            onClick={() => setEditAvatarUrl(avatarEmoji)}
+                            className={`w-6 h-6 rounded-lg text-xs flex items-center justify-center transition cursor-pointer ${
+                              editAvatarUrl === avatarEmoji ? 'bg-white shadow-xs scale-110' : 'hover:bg-slate-200'
+                            }`}
+                          >
+                            {avatarEmoji}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              </div>
 
-              {/* Safety & Emergency Contact Card */}
-              <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-1">
-                <span className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">
-                  Emergency Safety Contact
-                </span>
-                <p className="text-xs font-bold text-slate-700">
-                  Phone: {currentUser.emergencyContact || '0300-1122334'} (Family / Relative)
-                </p>
-              </div>
-
-              {/* DRIVER DEDICATED VERIFICATION & SECURITY SECTION */}
-              {currentUser.role === 'DRIVER' && (
+                {/* Personal Information Fields */}
                 <div className="border-t border-slate-100 pt-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-base">🛡️</span>
-                      <h3 className="text-sm font-black text-slate-900">Security & Document Verification</h3>
+                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-500">
+                    Personal Information
+                  </h3>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1">Full Name</label>
+                      <input
+                        type="text"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        required
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-emerald-600"
+                      />
                     </div>
 
-                    <span
-                      className={`text-[10px] font-black px-2.5 py-1 rounded-full uppercase ${
-                        currentUser.verificationStatus === 'VERIFIED'
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : 'bg-amber-100 text-amber-800'
-                      }`}
-                    >
-                      {currentUser.verificationStatus === 'VERIFIED' ? 'Verified Driver' : 'Under Review'}
-                    </span>
-                  </div>
-
-                  <p className="text-[11px] text-slate-500">
-                    Mandatory verification ensures safety for all passengers traveling intercity in Pakistan.
-                  </p>
-
-                  {/* Document Checklist Items */}
-                  <div className="space-y-2">
-                    {/* CNIC Card */}
-                    <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-2">
-                        <span className="text-lg">🪪</span>
-                        <div>
-                          <span className="font-bold text-slate-800 block">CNIC (National ID Card)</span>
-                          <span className="text-[11px] text-slate-500">{currentUser.cnicNumber || '44101-1234567-1'}</span>
-                        </div>
-                      </div>
-                      <span className="text-xs text-emerald-700 font-extrabold">✓ Attached</span>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1">Mobile Phone Number</label>
+                      <input
+                        type="tel"
+                        value={editPhone}
+                        onChange={(e) => setEditPhone(e.target.value)}
+                        required
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-emerald-600"
+                      />
                     </div>
 
-                    {/* Driving License */}
-                    <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-2">
-                        <span className="text-lg">📄</span>
-                        <div>
-                          <span className="font-bold text-slate-800 block">Driving License</span>
-                          <span className="text-[11px] text-slate-500">{currentUser.licenseNumber || 'DL-HYD-99812'}</span>
-                        </div>
-                      </div>
-                      <span className="text-xs text-emerald-700 font-extrabold">✓ Attached</span>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1">Home City</label>
+                      <select
+                        value={editCity}
+                        onChange={(e) => setEditCity(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-emerald-600"
+                      >
+                        {NATIONWIDE_CITIES.map((c) => (
+                          <option key={c.id} value={c.name}>
+                            {c.name} ({c.province})
+                          </option>
+                        ))}
+                      </select>
                     </div>
 
-                    {/* Vehicle Registration */}
-                    <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-2">
-                        <span className="text-lg">🚘</span>
-                        <div>
-                          <span className="font-bold text-slate-800 block">Vehicle Registration Book</span>
-                          <span className="text-[11px] text-slate-500">
-                            {currentUser.vehicle?.makeModel} ({currentUser.vehicle?.plate})
-                          </span>
-                        </div>
-                      </div>
-                      <span className="text-xs text-emerald-700 font-extrabold">✓ Attached</span>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                        Emergency Safety Contact (Family / Relative)
+                      </label>
+                      <input
+                        type="tel"
+                        value={editEmergency}
+                        onChange={(e) => setEditEmergency(e.target.value)}
+                        placeholder="0300-1122334"
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-emerald-600"
+                      />
                     </div>
                   </div>
                 </div>
-              )}
 
-              {/* Action Buttons */}
-              <div className="border-t border-slate-100 pt-3 flex flex-col gap-2">
+                {/* Driver Vehicle & Security Section (Only for Driver mode or when editing driver details) */}
+                {currentUser.role === 'DRIVER' && (
+                  <div className="border-t border-slate-100 pt-4 space-y-3.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-base">🚘</span>
+                        <h3 className="text-xs font-black uppercase tracking-wider text-slate-700">
+                          Vehicle &amp; Driver Credentials
+                        </h3>
+                      </div>
+                      <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                        Verified Vehicle
+                      </span>
+                    </div>
+
+                    {/* Vehicle Photo Upload & Preview */}
+                    <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-700">Vehicle Photo:</span>
+                        <label className="bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-[11px] py-1 px-2.5 rounded-lg transition cursor-pointer flex items-center gap-1">
+                          <span>📸</span>
+                          <span>Upload Car Photo</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleVehiclePhotoChange}
+                            className="hidden"
+                          />
+                        </label>
+                      </div>
+
+                      {editVehicleImageUrl ? (
+                        <div className="relative rounded-xl overflow-hidden border border-slate-200 h-32 w-full bg-slate-900">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={editVehicleImageUrl}
+                            alt="Vehicle Preview"
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      ) : (
+                        <div className="p-4 rounded-xl border border-dashed border-slate-300 text-center text-slate-400 text-xs">
+                          No car photo uploaded. Uploading a clean photo of your car builds high trust with families.
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-1">Vehicle Make &amp; Model</label>
+                        <input
+                          type="text"
+                          value={editVehicleModel}
+                          onChange={(e) => setEditVehicleModel(e.target.value)}
+                          placeholder="e.g. Toyota Corolla GLi"
+                          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-emerald-600"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-1">Registration Plate Number</label>
+                        <input
+                          type="text"
+                          value={editVehiclePlate}
+                          onChange={(e) => setEditVehiclePlate(e.target.value)}
+                          placeholder="LEB-4592"
+                          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold uppercase font-mono focus:outline-none focus:border-emerald-600"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-1">CNIC Number</label>
+                        <input
+                          type="text"
+                          value={editCnic}
+                          onChange={(e) => setEditCnic(e.target.value)}
+                          placeholder="44101-1234567-1"
+                          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold font-mono focus:outline-none focus:border-emerald-600"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-1">Driving License Number</label>
+                        <input
+                          type="text"
+                          value={editLicense}
+                          onChange={(e) => setEditLicense(e.target.value)}
+                          placeholder="DL-HYD-99812"
+                          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold font-mono focus:outline-none focus:border-emerald-600"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-1">Passenger Capacity</label>
+                        <select
+                          value={editVehicleCapacity}
+                          onChange={(e) => setEditVehicleCapacity(Number(e.target.value))}
+                          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-emerald-600"
+                        >
+                          <option value={3}>3 Passengers (Sedan comfortable)</option>
+                          <option value={4}>4 Passengers (Standard Sedan)</option>
+                          <option value={6}>6 Passengers (BR-V / Mini MPV)</option>
+                          <option value={10}>10+ Passengers (Hiace)</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-1">Car Color</label>
+                        <input
+                          type="text"
+                          value={editVehicleColor}
+                          onChange={(e) => setEditVehicleColor(e.target.value)}
+                          placeholder="White, Silver, etc."
+                          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-emerald-600"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Submit Save Button */}
+                <div className="pt-2">
+                  <button
+                    type="submit"
+                    className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-3.5 rounded-2xl shadow-sm transition uppercase tracking-wider cursor-pointer"
+                  >
+                    💾 Save Profile Changes
+                  </button>
+                </div>
+              </div>
+            </form>
+
+            {/* Account Switcher & Sign Out */}
+            <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-200 space-y-3">
+              <h3 className="text-xs font-black uppercase tracking-wider text-slate-500">
+                Mode Switch &amp; Session
+              </h3>
+
+              <div className="grid grid-cols-2 gap-2">
                 <button
-                  onClick={() => {
-                    if (currentUser.role === 'PASSENGER') {
-                      handleDemoLogin('DRIVER');
-                    } else {
-                      handleDemoLogin('PASSENGER');
-                    }
-                  }}
-                  className="w-full bg-slate-900 hover:bg-black text-white font-bold text-xs py-3 rounded-xl transition text-center cursor-pointer"
+                  type="button"
+                  onClick={() => handleSwitchRole(currentUser.role === 'PASSENGER' ? 'DRIVER' : 'PASSENGER')}
+                  className="bg-slate-900 hover:bg-black text-white font-bold text-xs py-3 rounded-xl transition text-center cursor-pointer"
                 >
-                  Switch Role to {currentUser.role === 'PASSENGER' ? '🚘 Driver (ڈرائیور)' : '🙋‍♂️ Sawari (سواری)'}
+                  Switch to {currentUser.role === 'PASSENGER' ? '🚘 Driver Mode' : '🙋‍♂️ Sawari Mode'}
                 </button>
 
                 <button
+                  type="button"
                   onClick={handleLogout}
-                  className="w-full bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs py-3 rounded-xl transition text-center cursor-pointer"
+                  className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs py-3 rounded-xl transition text-center cursor-pointer"
                 >
-                  Sign Out of Account
+                  Sign Out
                 </button>
               </div>
             </div>
