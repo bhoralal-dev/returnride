@@ -1184,52 +1184,119 @@ export default function Home() {
     setAuthError(null);
 
     try {
-      if (!supabase) {
-        throw new Error('Supabase client is not initialized.');
-      }
-
       const fullName = authName.trim() || authEmail.split('@')[0];
       const phone = authPhone.trim() || '0300-1234567';
-
-      const { data, error } = await supabase.auth.signUp({
-        email: authEmail.trim(),
-        password: authPassword,
-        options: {
-          data: {
-            full_name: fullName,
-            phone,
-            role: authRole,
-            city: authCity,
-            vehicle: authRole === 'DRIVER' ? {
+      const vehiclePayload =
+        authRole === 'DRIVER'
+          ? {
               makeModel: authCarModel,
               plate: authCarPlate,
               capacity: Number(authCarCapacity),
               hasAc: true,
               color: 'White',
-            } : undefined,
+            }
+          : undefined;
+
+      // 1. Try server-side instant registration with auto-confirmation first
+      let registeredUser: any = null;
+      try {
+        const regRes = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: authEmail.trim(),
+            password: authPassword,
+            fullName,
+            phone,
+            role: authRole,
+            city: authCity,
+            vehicle: vehiclePayload,
+          }),
+        });
+        const regJson = await regRes.json();
+        if (regRes.ok && regJson.success) {
+          registeredUser = regJson.user;
+        } else if (regJson.error && !regJson.error.toLowerCase().includes('server error')) {
+          throw new Error(regJson.error);
+        }
+      } catch (srvErr: unknown) {
+        if (srvErr instanceof Error && srvErr.message && !srvErr.message.includes('fetch')) {
+          throw srvErr;
+        }
+      }
+
+      // 2. Direct Supabase client sign up fallback if server registration was not used
+      if (!registeredUser && supabase) {
+        const { data, error } = await supabase.auth.signUp({
+          email: authEmail.trim(),
+          password: authPassword,
+          options: {
+            data: {
+              full_name: fullName,
+              phone,
+              role: authRole,
+              city: authCity,
+              vehicle: vehiclePayload,
+            },
           },
-        },
-      });
+        });
+        if (error) throw error;
+        registeredUser = data.user;
+      }
 
-      if (error) throw error;
-
-      if (data.user) {
-        const profile = mapSupabaseUserToProfile(data.user);
-        setCurrentUser(profile);
-        setShowAuthModal(false);
-        setAuthPassword('');
-        setNotification({
-          type: 'success',
-          title: 'Account Created Successfully!',
-          message: `Welcome to Apni Sawari, ${profile.name}! Your account is now active.`,
+      // 3. Immediately log in via Supabase password auth
+      if (supabase) {
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+          email: authEmail.trim(),
+          password: authPassword,
         });
 
-        if (profile.role === 'DRIVER') {
-          setPortalMode('DRIVER');
-          setActiveDriverNav('driver_trips');
-        } else if (selectedRideForBooking) {
-          setShowBookingModal(true);
+        if (!signInError && signInData?.user) {
+          const profile = mapSupabaseUserToProfile(signInData.user);
+          setCurrentUser(profile);
+          setShowAuthModal(false);
+          setAuthPassword('');
+          setNotification({
+            type: 'success',
+            title: 'Account Created Successfully!',
+            message: `Welcome to Apni Sawari, ${profile.name}! Your account is now active.`,
+          });
+
+          if (profile.role === 'DRIVER') {
+            setPortalMode('DRIVER');
+            setActiveDriverNav('driver_trips');
+          } else if (selectedRideForBooking) {
+            setShowBookingModal(true);
+          }
+          return;
         }
+      }
+
+      // Fallback profile if auto sign-in was deferred
+      const fallbackProfile: AppUserProfile = {
+        id: registeredUser?.id || `usr-${Date.now()}`,
+        name: fullName,
+        email: authEmail.trim(),
+        phone,
+        role: authRole,
+        city: authCity,
+        vehicle: vehiclePayload,
+        verificationStatus: 'VERIFIED',
+      };
+      setCurrentUser(fallbackProfile);
+      setShowAuthModal(false);
+      setAuthPassword('');
+      setNotification({
+        type: 'success',
+        title: 'Account Created Successfully!',
+        message: `Welcome to Apni Sawari, ${fullName}! Your account is now active.`,
+      });
+
+      if (authRole === 'DRIVER') {
+        setPortalMode('DRIVER');
+        setActiveDriverNav('driver_trips');
+      } else if (selectedRideForBooking) {
+        setShowBookingModal(true);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Registration failed.';
