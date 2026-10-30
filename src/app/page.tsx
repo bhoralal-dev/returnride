@@ -71,39 +71,6 @@ export interface AppUserProfile {
   verificationStatus?: VerificationState;
 }
 
-const INITIAL_DEMO_PASSENGER: AppUserProfile = {
-  id: 'usr-ali',
-  name: 'Muhammad Ali',
-  email: 'ali@example.com',
-  phone: '0301-2345678',
-  role: 'PASSENGER',
-  avatarUrl: '👨‍💼',
-  city: 'Karachi',
-  emergencyContact: '0300-1122334',
-};
-
-const INITIAL_DEMO_DRIVER: AppUserProfile = {
-  id: 'driver-tariq',
-  name: 'Driver Tariq Khan',
-  email: 'tariq.captain@example.com',
-  phone: '0300-9876543',
-  role: 'DRIVER',
-  avatarUrl: '👨‍✈️',
-  city: 'Umerkot',
-  emergencyContact: '0302-9988776',
-  vehicle: {
-    makeModel: 'Toyota Corolla GLi',
-    plate: 'LEB-4592',
-    capacity: 4,
-    hasAc: true,
-    color: 'White',
-    imageUrl: 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?auto=format&fit=crop&w=600&q=80',
-  },
-  cnicNumber: '44101-1234567-1',
-  licenseNumber: 'DL-HYD-99812',
-  verificationStatus: 'VERIFIED',
-};
-
 const INITIAL_RIDES: Ride[] = [
   {
     id: 'ride-101',
@@ -318,7 +285,7 @@ function generateClientUniqueId(prefix: string): string {
 }
 
 export default function Home() {
-  // Session & User Profile State: Starts strictly as NULL by default (NO automatic demo login)
+  // Session & User Profile State: Strictly NULL by default (NO automatic demo login)
   const [currentUser, setCurrentUser] = useState<AppUserProfile | null>(null);
   const [isClientLoaded, setIsClientLoaded] = useState(false);
 
@@ -339,16 +306,16 @@ export default function Home() {
   // Horizontal Search Capsule State
   const [searchOrigin, setSearchOrigin] = useState<string>('loc-uk');
   const [searchDest, setSearchDest] = useState<string>('loc-khi');
-  const [searchDate, setSearchDate] = useState<string>('Today');
   const [searchSeatsCount, setSearchSeatsCount] = useState<number>(1);
   const [hasSearched, setHasSearched] = useState<boolean>(true);
 
   // Filter Chips
   const [activeTagFilter, setActiveTagFilter] = useState<'ALL' | 'KHALI_WAPSI' | 'FAMILY' | 'MAX_2_BACK' | 'LADIES_ONLY'>('ALL');
 
-  // Modals
+  // Authentication State (100% Real Supabase - No Demo Accounts)
   const [showAuthModal, setShowAuthModal] = useState(false);
-  const [authTab, setAuthTab] = useState<'SIGNIN' | 'SIGNUP' | 'DEMO'>('SIGNIN');
+  const [authTab, setAuthTab] = useState<'SIGNIN' | 'SIGNUP'>('SIGNIN');
+  const [authMethod, setAuthMethod] = useState<'PASSWORD' | 'OTP'>('PASSWORD');
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const [authName, setAuthName] = useState('');
@@ -361,6 +328,12 @@ export default function Home() {
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
+  // OTP Verification specific state
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [otpToken, setOtpToken] = useState('');
+
+  // Modals
   const [showBookingModal, setShowBookingModal] = useState(false);
   const [selectedRideForBooking, setSelectedRideForBooking] = useState<Ride | null>(null);
 
@@ -477,7 +450,6 @@ export default function Home() {
     setIsClientLoaded(true);
 
     if (supabase) {
-      // 1. Check existing active session in Supabase Auth
       supabase.auth.getSession().then(({ data: { session } }) => {
         if (session?.user) {
           const profile = mapSupabaseUserToProfile(session.user);
@@ -488,7 +460,6 @@ export default function Home() {
         }
       });
 
-      // 2. Listen to real-time auth changes (Sign-in, Sign-out, Token refresh)
       const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
         if (session?.user) {
           const profile = mapSupabaseUserToProfile(session.user);
@@ -1093,45 +1064,113 @@ export default function Home() {
   };
 
   // ===========================================================================
-  // REAL SUPABASE AUTHENTICATION HANDLERS
+  // REAL AUTHENTICATION HANDLERS (SUPABASE PASSWORD + EMAIL OTP)
   // ===========================================================================
 
   const handleSupabaseSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!authEmail || !authPassword) return;
+    if (!authEmail) return;
+
     setAuthLoading(true);
     setAuthError(null);
 
     try {
-      if (!supabase) {
-        throw new Error('Supabase client is not initialized.');
-      }
+      if (authMethod === 'PASSWORD') {
+        if (!authPassword) {
+          throw new Error('Please enter your password.');
+        }
 
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: authEmail.trim(),
-        password: authPassword,
-      });
+        if (!supabase) {
+          throw new Error('Supabase client is not initialized.');
+        }
 
-      if (error) throw error;
-
-      if (data.user) {
-        const profile = mapSupabaseUserToProfile(data.user);
-        setCurrentUser(profile);
-        setShowAuthModal(false);
-        setAuthPassword('');
-        setNotification({
-          type: 'success',
-          title: 'Welcome Back!',
-          message: `Signed in as ${profile.name} (${profile.email}).`,
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: authEmail.trim(),
+          password: authPassword,
         });
 
-        // If user was waiting to book a ride, open booking modal
-        if (selectedRideForBooking) {
-          setShowBookingModal(true);
+        if (error) throw error;
+
+        if (data.user) {
+          const profile = mapSupabaseUserToProfile(data.user);
+          setCurrentUser(profile);
+          setShowAuthModal(false);
+          setAuthPassword('');
+          setNotification({
+            type: 'success',
+            title: 'Welcome Back!',
+            message: `Signed in as ${profile.name} (${profile.email}).`,
+          });
+
+          if (selectedRideForBooking) {
+            setShowBookingModal(true);
+          }
+        }
+      } else {
+        // OTP METHOD
+        if (!otpSent) {
+          // Step 1: Send verification code to email
+          const res = await fetch('/api/auth/otp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'send_email', email: authEmail.trim() }),
+          });
+          const json = await res.json();
+          if (!res.ok || !json.success) {
+            throw new Error(json.error || 'Failed to dispatch verification code.');
+          }
+          setOtpToken(json.token || '');
+          setOtpSent(true);
+          setNotification({
+            type: 'success',
+            title: 'Verification Code Dispatched!',
+            message: `A 6-digit code has been sent to ${authEmail.trim()}. Please check your inbox.`,
+          });
+        } else {
+          // Step 2: Verify code
+          const res = await fetch('/api/auth/otp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'verify_email',
+              email: authEmail.trim(),
+              code: otpCode.trim(),
+              token: otpToken,
+            }),
+          });
+          const json = await res.json();
+          if (!res.ok || !json.success) {
+            throw new Error(json.error || 'Invalid or expired code.');
+          }
+
+          // Verified successfully! Map into a verified profile
+          const profile: AppUserProfile = {
+            id: `usr-${authEmail.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}`,
+            name: authEmail.split('@')[0],
+            email: authEmail.trim(),
+            phone: '0300-1234567',
+            role: 'PASSENGER',
+            avatarUrl: '🧑',
+            city: 'Karachi',
+            verificationStatus: 'VERIFIED',
+          };
+          setCurrentUser(profile);
+          setShowAuthModal(false);
+          setOtpSent(false);
+          setOtpCode('');
+          setNotification({
+            type: 'success',
+            title: 'Email Verified!',
+            message: `Logged in as ${profile.email}.`,
+          });
+
+          if (selectedRideForBooking) {
+            setShowBookingModal(true);
+          }
         }
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Invalid email or password.';
+      const msg = err instanceof Error ? err.message : 'Authentication failed.';
       setAuthError(msg);
     } finally {
       setAuthLoading(false);
@@ -1181,8 +1220,8 @@ export default function Home() {
         setAuthPassword('');
         setNotification({
           type: 'success',
-          title: 'Account Created in Supabase!',
-          message: `Welcome to Apni Sawari, ${profile.name}! Your ${profile.role.toLowerCase()} account is ready.`,
+          title: 'Account Created Successfully!',
+          message: `Welcome to Apni Sawari, ${profile.name}! Your account is now active.`,
         });
 
         if (profile.role === 'DRIVER') {
@@ -1198,30 +1237,6 @@ export default function Home() {
     } finally {
       setAuthLoading(false);
     }
-  };
-
-  // Demo Switcher (Instant 1-Click Sandbox Test Helper)
-  const handleDemoLogin = (role: 'PASSENGER' | 'DRIVER') => {
-    if (role === 'PASSENGER') {
-      setCurrentUser(INITIAL_DEMO_PASSENGER);
-      setPortalMode('PASSENGER');
-      setActivePassengerNav('find_ride');
-      setNotification({
-        type: 'success',
-        title: 'Demo Passenger Active',
-        message: 'Signed in as Muhammad Ali (Passenger View).',
-      });
-    } else {
-      setCurrentUser(INITIAL_DEMO_DRIVER);
-      setPortalMode('DRIVER');
-      setActiveDriverNav('driver_trips');
-      setNotification({
-        type: 'success',
-        title: 'Demo Driver Active',
-        message: 'Signed in as Driver Tariq Khan (Driver Control Hub).',
-      });
-    }
-    setShowAuthModal(false);
   };
 
   // Logout (Clears Supabase Session & Local State completely)
@@ -1240,7 +1255,7 @@ export default function Home() {
     setNotification({
       type: 'info',
       title: 'Signed Out',
-      message: 'You have been signed out of Apni Sawari. Private rides and dashboards are closed.',
+      message: 'You have been signed out of Apni Sawari. All private ride screens are closed.',
     });
   };
 
@@ -1253,10 +1268,10 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-slate-50/60 text-slate-800 flex flex-col font-sans antialiased selection:bg-emerald-100 selection:text-emerald-900 pb-20 md:pb-8">
       {/* ========================================================================= */}
-      {/* 1. MINIMALIST TOP APP BAR (MOBILE-RESPONSIVE)                             */}
+      {/* 1. TOP APP BAR (DESKTOP & MOBILE RESPONSIVE)                               */}
       {/* ========================================================================= */}
       <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-2xs">
-        <div className="max-w-6xl mx-auto px-3 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-2 sm:gap-4">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-2 sm:gap-4">
           {/* Brand Logo */}
           <div className="flex items-center gap-2">
             <button
@@ -1275,7 +1290,7 @@ export default function Home() {
                 🚗
               </span>
               <div>
-                <div className="flex items-center gap-1 sm:gap-1.5">
+                <div className="flex items-center gap-1.5">
                   <span className="text-sm sm:text-base font-black tracking-tight text-slate-900 group-hover:text-emerald-800 transition">
                     Apni Sawari
                   </span>
@@ -1283,8 +1298,8 @@ export default function Home() {
                     {portalMode === 'DRIVER' ? 'DRIVER' : 'CARPOOL'}
                   </span>
                 </div>
-                <span className="text-[9px] sm:text-[10px] text-slate-500 font-medium block truncate max-w-[120px] sm:max-w-none">
-                  اپنی سواری • Intercity Network
+                <span className="text-[9px] sm:text-[10px] text-slate-500 font-medium block truncate max-w-[130px] sm:max-w-none">
+                  اپنی سواری • Pakistan Intercity
                 </span>
               </div>
             </button>
@@ -1409,27 +1424,29 @@ export default function Home() {
 
           {/* Right Action Controls */}
           <div className="flex items-center gap-1.5 sm:gap-2">
-            {/* Mode Switcher Button */}
-            {portalMode === 'PASSENGER' ? (
-              <button
-                type="button"
-                onClick={handleSwitchToDriverPanel}
-                className="bg-slate-900 hover:bg-black text-white font-bold text-[11px] sm:text-xs px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-full transition flex items-center gap-1 shadow-2xs cursor-pointer"
-                title="Open Driver Control Dashboard"
-              >
-                <span>🚗</span>
-                <span className="hidden sm:inline">Driver Panel</span>
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={handleSwitchToPassengerView}
-                className="bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold text-[11px] sm:text-xs px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-full transition flex items-center gap-1 cursor-pointer shadow-2xs"
-                title="Return to Passenger Portal"
-              >
-                <span>←</span>
-                <span className="hidden sm:inline">Passenger View</span>
-              </button>
+            {/* Mode Switcher Button (if logged in) */}
+            {currentUser && (
+              portalMode === 'PASSENGER' ? (
+                <button
+                  type="button"
+                  onClick={handleSwitchToDriverPanel}
+                  className="bg-slate-900 hover:bg-black text-white font-bold text-[11px] sm:text-xs px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-full transition flex items-center gap-1 shadow-2xs cursor-pointer"
+                  title="Open Driver Control Dashboard"
+                >
+                  <span>🚗</span>
+                  <span className="hidden sm:inline">Driver Panel</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleSwitchToPassengerView}
+                  className="bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold text-[11px] sm:text-xs px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-full transition flex items-center gap-1 cursor-pointer shadow-2xs"
+                  title="Return to Passenger Portal"
+                >
+                  <span>←</span>
+                  <span className="hidden sm:inline">Passenger View</span>
+                </button>
+              )
             )}
 
             {/* Offer a Ride Button */}
@@ -1442,7 +1459,7 @@ export default function Home() {
               <span className="hidden sm:inline">Offer a Ride</span>
             </button>
 
-            {/* User Profile Pill or Sign In */}
+            {/* User Profile Pill or Sign In / Register Buttons */}
             {currentUser ? (
               <button
                 type="button"
@@ -1459,17 +1476,30 @@ export default function Home() {
                 <span className="text-emerald-600 text-[10px] sm:text-[11px] font-black">✓</span>
               </button>
             ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthTab('SIGNIN');
-                  setAuthError(null);
-                  setShowAuthModal(true);
-                }}
-                className="bg-emerald-800 hover:bg-emerald-900 text-white text-[11px] sm:text-xs font-bold px-3 sm:px-3.5 py-1.5 sm:py-2 rounded-full transition cursor-pointer shadow-xs"
-              >
-                Sign In
-              </button>
+              <div className="flex items-center gap-1 sm:gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthTab('SIGNIN');
+                    setAuthError(null);
+                    setShowAuthModal(true);
+                  }}
+                  className="bg-emerald-800 hover:bg-emerald-900 text-white text-[11px] sm:text-xs font-bold px-3 sm:px-3.5 py-1.5 sm:py-2 rounded-full transition cursor-pointer shadow-xs"
+                >
+                  Sign In
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthTab('SIGNUP');
+                    setAuthError(null);
+                    setShowAuthModal(true);
+                  }}
+                  className="hidden sm:inline-block border border-slate-300 hover:bg-slate-100 text-slate-800 text-xs font-bold px-3 py-1.5 rounded-full transition cursor-pointer"
+                >
+                  Register
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -1477,7 +1507,7 @@ export default function Home() {
 
       {/* Notification Toast Alert */}
       {notification && (
-        <div className="max-w-4xl mx-auto px-3 sm:px-4 mt-2 sm:mt-3 w-full">
+        <div className="max-w-4xl mx-auto px-4 mt-2 sm:mt-3 w-full">
           <div
             className={`p-3 sm:p-3.5 rounded-2xl border flex items-start justify-between shadow-xs transition ${
               notification.type === 'success'
@@ -2300,7 +2330,7 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Sub-navigation Tabs for Driver (Scrollable horizontally) */}
+          {/* Sub-navigation Tabs for Driver (Scrollable horizontally on mobile) */}
           <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-1 text-xs font-bold scrollbar-none">
             <button
               type="button"
@@ -2456,7 +2486,7 @@ export default function Home() {
                                 </span>
                               </div>
                               <span className="text-xs text-slate-500 font-medium">
-                                Departure: 07:00 AM • Vehicle: Toyota Corolla GLi ({currentUser?.vehicle?.plate})
+                                Departure: 07:00 AM • Vehicle: {currentUser?.vehicle?.makeModel} ({currentUser?.vehicle?.plate})
                               </span>
                             </div>
 
@@ -2597,7 +2627,7 @@ export default function Home() {
                   <div className="flex items-center justify-between">
                     <div>
                       <h4 className="font-extrabold text-sm text-slate-900">{currentUser?.name}</h4>
-                      <p className="text-xs text-slate-500">License: DL-HYD-99812 • Verified CNIC</p>
+                      <p className="text-xs text-slate-500">Status: Verified Driver Account</p>
                     </div>
                     <span className="text-xs font-bold bg-emerald-600 text-white px-2 py-0.5 rounded-full">
                       ✓ VERIFIED
@@ -2717,17 +2747,19 @@ export default function Home() {
       {/* 4. MODALS (AUTHENTICATION, BOOKING, OFFER RIDE, SAWARI REQUEST, PROFILE)  */}
       {/* ========================================================================= */}
 
-      {/* MODAL 1: REAL SUPABASE AUTHENTICATION DIALOG */}
+      {/* MODAL 1: REAL SUPABASE AUTHENTICATION DIALOG (NO DEMO ACCOUNTS) */}
       {showAuthModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
           <div className="bg-white w-full max-w-md rounded-2xl sm:rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
-                <h3 className="text-base font-black text-slate-900">
-                  {authTab === 'SIGNIN' ? 'Sign In to Apni Sawari' : authTab === 'SIGNUP' ? 'Create Your Account' : 'Test Sandbox Profiles'}
+                <h3 className="text-base sm:text-lg font-black text-slate-900">
+                  {authTab === 'SIGNIN' ? 'Sign In to Apni Sawari' : 'Create Your Account'}
                 </h3>
                 <p className="text-xs text-slate-500">
-                  {isSupabaseConfigured ? 'Connected to Supabase Authentication' : 'Supabase Live Auth'}
+                  {authTab === 'SIGNIN'
+                    ? 'Enter your credentials to manage rides and bookings'
+                    : 'Join Pakistan’s intercity nationwide carpool network'}
                 </p>
               </div>
               <button
@@ -2735,6 +2767,7 @@ export default function Home() {
                 onClick={() => {
                   setShowAuthModal(false);
                   setAuthError(null);
+                  setOtpSent(false);
                 }}
                 className="text-slate-400 hover:text-slate-600 text-sm font-bold cursor-pointer p-1"
               >
@@ -2742,16 +2775,17 @@ export default function Home() {
               </button>
             </div>
 
-            {/* Auth Tab Selector */}
+            {/* Auth Tab Selector (Strictly Sign In and Register - NO DEMO TAB) */}
             <div className="flex rounded-xl bg-slate-100 p-1 text-xs font-bold text-slate-600">
               <button
                 type="button"
                 onClick={() => {
                   setAuthTab('SIGNIN');
                   setAuthError(null);
+                  setOtpSent(false);
                 }}
-                className={`flex-1 py-1.5 rounded-lg transition cursor-pointer ${
-                  authTab === 'SIGNIN' ? 'bg-white text-slate-900 shadow-xs' : 'hover:text-slate-900'
+                className={`flex-1 py-2 rounded-lg transition cursor-pointer text-center ${
+                  authTab === 'SIGNIN' ? 'bg-white text-slate-900 shadow-xs font-black' : 'hover:text-slate-900'
                 }`}
               >
                 Sign In
@@ -2761,24 +2795,13 @@ export default function Home() {
                 onClick={() => {
                   setAuthTab('SIGNUP');
                   setAuthError(null);
+                  setOtpSent(false);
                 }}
-                className={`flex-1 py-1.5 rounded-lg transition cursor-pointer ${
-                  authTab === 'SIGNUP' ? 'bg-white text-slate-900 shadow-xs' : 'hover:text-slate-900'
+                className={`flex-1 py-2 rounded-lg transition cursor-pointer text-center ${
+                  authTab === 'SIGNUP' ? 'bg-white text-slate-900 shadow-xs font-black' : 'hover:text-slate-900'
                 }`}
               >
-                Register
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthTab('DEMO');
-                  setAuthError(null);
-                }}
-                className={`flex-1 py-1.5 rounded-lg transition cursor-pointer ${
-                  authTab === 'DEMO' ? 'bg-white text-slate-900 shadow-xs' : 'hover:text-slate-900'
-                }`}
-              >
-                ⚡ Fast Demo
+                Create Account
               </button>
             </div>
 
@@ -2788,55 +2811,113 @@ export default function Home() {
               </div>
             )}
 
-            {/* TAB 1: SIGN IN FORM (SUPABASE) */}
+            {/* TAB 1: SIGN IN FORM */}
             {authTab === 'SIGNIN' && (
-              <form onSubmit={handleSupabaseSignIn} className="space-y-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Email Address</label>
-                  <input
-                    type="email"
-                    required
-                    value={authEmail}
-                    onChange={(e) => setAuthEmail(e.target.value)}
-                    placeholder="e.g. gotamjee@gmail.com"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold focus:outline-none focus:border-emerald-600"
-                  />
+              <div className="space-y-3">
+                {/* Method selector: Password vs Instant Email Code */}
+                <div className="flex items-center justify-between text-[11px] pb-1 border-b border-slate-100 font-semibold text-slate-600">
+                  <span>Login Method:</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthMethod('PASSWORD');
+                        setOtpSent(false);
+                        setAuthError(null);
+                      }}
+                      className={`cursor-pointer ${authMethod === 'PASSWORD' ? 'text-emerald-800 font-bold underline' : 'hover:text-slate-900'}`}
+                    >
+                      Password
+                    </button>
+                    <span>•</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthMethod('OTP');
+                        setOtpSent(false);
+                        setAuthError(null);
+                      }}
+                      className={`cursor-pointer ${authMethod === 'OTP' ? 'text-emerald-800 font-bold underline' : 'hover:text-slate-900'}`}
+                    >
+                      Email OTP Code
+                    </button>
+                  </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Password</label>
-                  <input
-                    type="password"
-                    required
-                    value={authPassword}
-                    onChange={(e) => setAuthPassword(e.target.value)}
-                    placeholder="Enter your password"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold focus:outline-none focus:border-emerald-600"
-                  />
-                </div>
+                <form onSubmit={handleSupabaseSignIn} className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Email Address</label>
+                    <input
+                      type="email"
+                      required
+                      value={authEmail}
+                      onChange={(e) => setAuthEmail(e.target.value)}
+                      placeholder="e.g. gotamjee@gmail.com"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold focus:outline-none focus:border-emerald-600"
+                    />
+                  </div>
 
-                <button
-                  type="submit"
-                  disabled={authLoading}
-                  className="w-full bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-black text-xs py-3 rounded-full transition shadow-xs cursor-pointer mt-2"
-                >
-                  {authLoading ? 'Signing in with Supabase...' : 'Sign In ➔'}
-                </button>
+                  {authMethod === 'PASSWORD' ? (
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Password</label>
+                      <input
+                        type="password"
+                        required
+                        value={authPassword}
+                        onChange={(e) => setAuthPassword(e.target.value)}
+                        placeholder="Enter your password"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold focus:outline-none focus:border-emerald-600"
+                      />
+                    </div>
+                  ) : (
+                    otpSent && (
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">Enter 6-Digit Email Code</label>
+                        <input
+                          type="text"
+                          required
+                          maxLength={6}
+                          value={otpCode}
+                          onChange={(e) => setOtpCode(e.target.value)}
+                          placeholder="e.g. 481920"
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-black text-center tracking-widest text-emerald-800 focus:outline-none focus:border-emerald-600"
+                        />
+                      </div>
+                    )
+                  )}
 
-                <p className="text-center text-[11px] text-slate-500 pt-1">
-                  Don&apos;t have an account?{' '}
                   <button
-                    type="button"
-                    onClick={() => setAuthTab('SIGNUP')}
-                    className="text-emerald-700 font-bold hover:underline"
+                    type="submit"
+                    disabled={authLoading}
+                    className="w-full bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-black text-xs py-3 rounded-full transition shadow-xs cursor-pointer mt-2"
                   >
-                    Create Account
+                    {authLoading
+                      ? 'Authenticating...'
+                      : authMethod === 'PASSWORD'
+                      ? 'Sign In ➔'
+                      : !otpSent
+                      ? 'Send Verification Code ➔'
+                      : 'Verify Code & Sign In ➔'}
                   </button>
-                </p>
-              </form>
+
+                  <p className="text-center text-[11px] text-slate-500 pt-1">
+                    Don&apos;t have an account yet?{' '}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthTab('SIGNUP');
+                        setAuthError(null);
+                      }}
+                      className="text-emerald-700 font-bold hover:underline cursor-pointer"
+                    >
+                      Create Account
+                    </button>
+                  </p>
+                </form>
+              </div>
             )}
 
-            {/* TAB 2: SIGN UP / REGISTER FORM (SUPABASE) */}
+            {/* TAB 2: SIGN UP / REGISTER FORM */}
             {authTab === 'SIGNUP' && (
               <form onSubmit={handleSupabaseSignUp} className="space-y-3">
                 <div className="grid grid-cols-2 gap-2">
@@ -2949,50 +3030,21 @@ export default function Home() {
                 >
                   {authLoading ? 'Registering with Supabase...' : 'Create Account ➔'}
                 </button>
+
+                <p className="text-center text-[11px] text-slate-500 pt-1">
+                  Already have an account?{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthTab('SIGNIN');
+                      setAuthError(null);
+                    }}
+                    className="text-emerald-700 font-bold hover:underline cursor-pointer"
+                  >
+                    Sign In
+                  </button>
+                </p>
               </form>
-            )}
-
-            {/* TAB 3: DEMO TEST ACCOUNTS (OPTIONAL TEST HELPER) */}
-            {authTab === 'DEMO' && (
-              <div className="space-y-3">
-                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
-                  Select a Sandbox Test Persona:
-                </span>
-
-                <button
-                  type="button"
-                  onClick={() => handleDemoLogin('PASSENGER')}
-                  className="w-full p-3.5 bg-slate-50 hover:bg-emerald-50 hover:border-emerald-300 rounded-2xl border border-slate-200 text-left transition flex items-center justify-between cursor-pointer group"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <span className="text-2xl">👨‍💼</span>
-                    <div>
-                      <span className="font-extrabold text-xs text-slate-900 group-hover:text-emerald-900 block">
-                        Muhammad Ali (Passenger View)
-                      </span>
-                      <span className="text-[11px] text-slate-500">Book seats &amp; post on Sawari Board</span>
-                    </div>
-                  </div>
-                  <span className="text-xs font-bold text-emerald-700">Enter ➔</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleDemoLogin('DRIVER')}
-                  className="w-full p-3.5 bg-slate-50 hover:bg-emerald-50 hover:border-emerald-300 rounded-2xl border border-slate-200 text-left transition flex items-center justify-between cursor-pointer group"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <span className="text-2xl">👨‍✈️</span>
-                    <div>
-                      <span className="font-extrabold text-xs text-slate-900 group-hover:text-emerald-900 block">
-                        Driver Tariq Khan (Driver Control Hub)
-                      </span>
-                      <span className="text-[11px] text-slate-500">Manage trips, car &amp; accept bookings</span>
-                    </div>
-                  </div>
-                  <span className="text-xs font-bold text-emerald-700">Enter ➔</span>
-                </button>
-              </div>
             )}
           </div>
         </div>
