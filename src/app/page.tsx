@@ -2,25 +2,21 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
+import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import {
   acceptBookingRequest,
   rejectBookingRequest,
   cancelConfirmedBooking,
-  cancelRide,
   createBookingRequest,
   calculateAvailableSeats,
   BookingEngineError,
 } from '@/lib/booking-engine';
 import {
   evaluateUserReliability,
-  checkUserActionEligibility,
-  createCancellationEvent,
-  submitEmergencyAppeal,
 } from '@/lib/reliability-engine';
 import type {
   CancellationEvent,
   CancellationAppeal,
-  EmergencyReasonCategory,
 } from '@/types/reliability';
 import type {
   Ride,
@@ -29,8 +25,6 @@ import type {
   RideBookingMode,
   PassengerRideRequest,
   DriverOffer,
-  DriverBadgeTier,
-  TravelComfortAttributes,
 } from '@/types';
 
 interface City {
@@ -75,9 +69,6 @@ export interface AppUserProfile {
   cnicNumber?: string;
   licenseNumber?: string;
   verificationStatus?: VerificationState;
-  idDocumentUploaded?: boolean;
-  licenseDocumentUploaded?: boolean;
-  vehicleRegistrationUploaded?: boolean;
 }
 
 const INITIAL_DEMO_PASSENGER: AppUserProfile = {
@@ -111,9 +102,6 @@ const INITIAL_DEMO_DRIVER: AppUserProfile = {
   cnicNumber: '44101-1234567-1',
   licenseNumber: 'DL-HYD-99812',
   verificationStatus: 'VERIFIED',
-  idDocumentUploaded: true,
-  licenseDocumentUploaded: true,
-  vehicleRegistrationUploaded: true,
 };
 
 const INITIAL_RIDES: Ride[] = [
@@ -323,19 +311,6 @@ const INITIAL_BOOKINGS: BookingRequest[] = [
     createdAt: '2026-10-29T10:00:00Z',
     updatedAt: '2026-10-29T10:00:00Z',
   },
-  {
-    id: 'req-ali-1',
-    rideId: 'ride-102',
-    passengerId: 'Muhammad Ali (#usr-ali)',
-    bookingType: 'SEAT',
-    requestedSeats: 1,
-    totalPrice: 1800,
-    status: 'ACCEPTED',
-    dropoffStopName: 'Hyderabad Central Bypass',
-    isRoundTrip: false,
-    createdAt: '2026-10-29T09:30:00Z',
-    updatedAt: '2026-10-29T09:45:00Z',
-  },
 ];
 
 function generateClientUniqueId(prefix: string): string {
@@ -343,15 +318,9 @@ function generateClientUniqueId(prefix: string): string {
 }
 
 export default function Home() {
-  // Session & User Profile State
-  const [currentUser, setCurrentUser] = useState<AppUserProfile | null>(INITIAL_DEMO_PASSENGER);
+  // Session & User Profile State: Starts strictly as NULL by default (NO automatic demo login)
+  const [currentUser, setCurrentUser] = useState<AppUserProfile | null>(null);
   const [isClientLoaded, setIsClientLoaded] = useState(false);
-
-  // Registered Users Registry
-  const [registeredUsers, setRegisteredUsers] = useState<AppUserProfile[]>([
-    INITIAL_DEMO_PASSENGER,
-    INITIAL_DEMO_DRIVER,
-  ]);
 
   // Main Portal Mode: 'PASSENGER' (Finding/Booking Rides) vs 'DRIVER' (Driver Dashboard & Controls)
   const [portalMode, setPortalMode] = useState<'PASSENGER' | 'DRIVER'>('PASSENGER');
@@ -379,6 +348,19 @@ export default function Home() {
 
   // Modals
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authTab, setAuthTab] = useState<'SIGNIN' | 'SIGNUP' | 'DEMO'>('SIGNIN');
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authName, setAuthName] = useState('');
+  const [authPhone, setAuthPhone] = useState('');
+  const [authRole, setAuthRole] = useState<'PASSENGER' | 'DRIVER'>('PASSENGER');
+  const [authCity, setAuthCity] = useState('Karachi');
+  const [authCarModel, setAuthCarModel] = useState('Toyota Corolla');
+  const [authCarPlate, setAuthCarPlate] = useState('LEB-4592');
+  const [authCarCapacity, setAuthCarCapacity] = useState(4);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+
   const [showBookingModal, setShowBookingModal] = useState(false);
   const [selectedRideForBooking, setSelectedRideForBooking] = useState<Ride | null>(null);
 
@@ -460,18 +442,66 @@ export default function Home() {
   } | null>(null);
 
   // Reliability Engine State
-  const [cancellationEvents, setCancellationEvents] = useState<CancellationEvent[]>([]);
-  const [appeals, setAppeals] = useState<CancellationAppeal[]>([]);
+  const [cancellationEvents] = useState<CancellationEvent[]>([]);
+  const [appeals] = useState<CancellationAppeal[]>([]);
 
-  // Auth Dialog View State
-  const [authView, setAuthView] = useState<'LOGIN' | 'OTP' | 'REGISTER'>('LOGIN');
-  const [authEmail, setAuthEmail] = useState('');
-  const [authOtp, setAuthOtp] = useState('');
-  const [otpToken, setOtpToken] = useState('');
-  const [authLoading, setAuthLoading] = useState(false);
+  // Helper to construct AppUserProfile from Supabase Auth User
+  const mapSupabaseUserToProfile = (user: { id: string; email?: string; user_metadata?: Record<string, unknown> }): AppUserProfile => {
+    const meta = user.user_metadata || {};
+    const role = (meta.role === 'DRIVER' ? 'DRIVER' : 'PASSENGER') as 'PASSENGER' | 'DRIVER';
+    const vehicleMeta = meta.vehicle as AppUserProfile['vehicle'] | undefined;
 
+    return {
+      id: user.id,
+      name: (meta.full_name as string) || user.email?.split('@')[0] || 'Member',
+      email: user.email || '',
+      phone: (meta.phone as string) || '0300-1234567',
+      role,
+      avatarUrl: role === 'DRIVER' ? '👨‍✈️' : '🧑',
+      city: (meta.city as string) || 'Karachi',
+      emergencyContact: (meta.emergencyContact as string) || '',
+      vehicle: vehicleMeta || (role === 'DRIVER' ? {
+        makeModel: (meta.carModel as string) || 'Toyota Corolla',
+        plate: (meta.carPlate as string) || 'LEB-4592',
+        capacity: Number(meta.carCapacity) || 4,
+        hasAc: true,
+        color: 'White',
+        imageUrl: 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?auto=format&fit=crop&w=600&q=80',
+      } : undefined),
+      verificationStatus: 'VERIFIED',
+    };
+  };
+
+  // Check Supabase session on client load and subscribe to auth state changes
   useEffect(() => {
     setIsClientLoaded(true);
+
+    if (supabase) {
+      // 1. Check existing active session in Supabase Auth
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session?.user) {
+          const profile = mapSupabaseUserToProfile(session.user);
+          setCurrentUser(profile);
+          if (profile.role === 'DRIVER') {
+            setPortalMode('DRIVER');
+          }
+        }
+      });
+
+      // 2. Listen to real-time auth changes (Sign-in, Sign-out, Token refresh)
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+        if (session?.user) {
+          const profile = mapSupabaseUserToProfile(session.user);
+          setCurrentUser(profile);
+        } else {
+          setCurrentUser(null);
+        }
+      });
+
+      return () => {
+        subscription.unsubscribe();
+      };
+    }
   }, []);
 
   // Sync profile form when currentUser changes
@@ -493,7 +523,7 @@ export default function Home() {
     }
   }, [currentUser]);
 
-  // Reliability score (computed after mount in useEffect to prevent Next.js prerender date impurity)
+  // Reliability score
   const [userReliability, setUserReliability] = useState<ReturnType<typeof evaluateUserReliability> | null>(null);
 
   useEffect(() => {
@@ -580,16 +610,20 @@ export default function Home() {
     setSearchDest(temp);
   };
 
-  // Switch to Driver Panel handler
+  // Switch to Driver Panel handler (Requires Authentication)
   const handleSwitchToDriverPanel = () => {
     if (!currentUser) {
-      setAuthView('LOGIN');
+      setAuthTab('SIGNIN');
       setShowAuthModal(true);
+      setNotification({
+        type: 'info',
+        title: 'Sign In Required',
+        message: 'Please sign in or create an account to access the Driver Control Hub.',
+      });
       return;
     }
 
     if (!currentUser.vehicle) {
-      // Prompt vehicle setup or switch to demo driver
       setOfferStep('VEHICLE_SETUP');
       setShowOfferRideModal(true);
       return;
@@ -615,11 +649,16 @@ export default function Home() {
     });
   };
 
-  // Open Offer a Ride Modal
+  // Open Offer a Ride Modal (Requires Authentication)
   const handleOpenOfferRide = () => {
     if (!currentUser) {
-      setAuthView('LOGIN');
+      setAuthTab('SIGNIN');
       setShowAuthModal(true);
+      setNotification({
+        type: 'info',
+        title: 'Sign In Required',
+        message: 'Please sign in to offer a ride and publish journeys.',
+      });
       return;
     }
 
@@ -650,7 +689,6 @@ export default function Home() {
     };
 
     setCurrentUser(updatedUser);
-    setRegisteredUsers((prev) => prev.map((u) => (u.id === updatedUser.id ? updatedUser : u)));
     setOfferStep('TRIP_DETAILS');
     setNotification({
       type: 'success',
@@ -711,11 +749,17 @@ export default function Home() {
     });
   };
 
-  // Open Booking Modal for Ride
+  // Open Booking Modal for Ride (Requires Authentication)
   const handleSelectRideForBooking = (ride: Ride) => {
     if (!currentUser) {
-      setAuthView('LOGIN');
+      setSelectedRideForBooking(ride);
+      setAuthTab('SIGNIN');
       setShowAuthModal(true);
+      setNotification({
+        type: 'info',
+        title: 'Sign In Required',
+        message: 'Please sign in or create an account to book your seat.',
+      });
       return;
     }
 
@@ -760,7 +804,7 @@ export default function Home() {
       const newBooking = createBookingRequest({
         id: generateClientUniqueId('req'),
         ride: selectedRideForBooking,
-        passengerId: `${currentUser.name} (#${currentUser.id})`,
+        passengerId: `${currentUser.name} (#${currentUser.id.slice(0, 6)})`,
         bookingType: bookingModeChoice,
         requestedSeats: seatsToBook,
         totalPrice: calculatedPrice,
@@ -863,7 +907,21 @@ export default function Home() {
     }
   };
 
-  // Post Sawari Request on Board
+  // Post Sawari Request on Board (Requires Authentication)
+  const handleOpenPostSawariRequest = () => {
+    if (!currentUser) {
+      setAuthTab('SIGNIN');
+      setShowAuthModal(true);
+      setNotification({
+        type: 'info',
+        title: 'Sign In Required',
+        message: 'Please sign in or register to post your ride request on the Sawari Board.',
+      });
+      return;
+    }
+    setShowPostRequestModal(true);
+  };
+
   const handlePostSawariRequest = (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) return;
@@ -941,7 +999,7 @@ export default function Home() {
     setNotification({
       type: 'success',
       title: 'Offer Sent to Passenger!',
-      message: `You accepted Dr./Passenger's budget. The passenger has been notified to confirm.`,
+      message: `You accepted the passenger budget. The passenger has been notified to confirm.`,
     });
   };
 
@@ -1026,7 +1084,6 @@ export default function Home() {
     };
 
     setCurrentUser(updated);
-    setRegisteredUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
     setShowProfileModal(false);
     setNotification({
       type: 'success',
@@ -1035,7 +1092,115 @@ export default function Home() {
     });
   };
 
-  // Demo Switcher
+  // ===========================================================================
+  // REAL SUPABASE AUTHENTICATION HANDLERS
+  // ===========================================================================
+
+  const handleSupabaseSignIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!authEmail || !authPassword) return;
+    setAuthLoading(true);
+    setAuthError(null);
+
+    try {
+      if (!supabase) {
+        throw new Error('Supabase client is not initialized.');
+      }
+
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: authEmail.trim(),
+        password: authPassword,
+      });
+
+      if (error) throw error;
+
+      if (data.user) {
+        const profile = mapSupabaseUserToProfile(data.user);
+        setCurrentUser(profile);
+        setShowAuthModal(false);
+        setAuthPassword('');
+        setNotification({
+          type: 'success',
+          title: 'Welcome Back!',
+          message: `Signed in as ${profile.name} (${profile.email}).`,
+        });
+
+        // If user was waiting to book a ride, open booking modal
+        if (selectedRideForBooking) {
+          setShowBookingModal(true);
+        }
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Invalid email or password.';
+      setAuthError(msg);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleSupabaseSignUp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!authEmail || !authPassword) return;
+    setAuthLoading(true);
+    setAuthError(null);
+
+    try {
+      if (!supabase) {
+        throw new Error('Supabase client is not initialized.');
+      }
+
+      const fullName = authName.trim() || authEmail.split('@')[0];
+      const phone = authPhone.trim() || '0300-1234567';
+
+      const { data, error } = await supabase.auth.signUp({
+        email: authEmail.trim(),
+        password: authPassword,
+        options: {
+          data: {
+            full_name: fullName,
+            phone,
+            role: authRole,
+            city: authCity,
+            vehicle: authRole === 'DRIVER' ? {
+              makeModel: authCarModel,
+              plate: authCarPlate,
+              capacity: Number(authCarCapacity),
+              hasAc: true,
+              color: 'White',
+            } : undefined,
+          },
+        },
+      });
+
+      if (error) throw error;
+
+      if (data.user) {
+        const profile = mapSupabaseUserToProfile(data.user);
+        setCurrentUser(profile);
+        setShowAuthModal(false);
+        setAuthPassword('');
+        setNotification({
+          type: 'success',
+          title: 'Account Created in Supabase!',
+          message: `Welcome to Apni Sawari, ${profile.name}! Your ${profile.role.toLowerCase()} account is ready.`,
+        });
+
+        if (profile.role === 'DRIVER') {
+          setPortalMode('DRIVER');
+          setActiveDriverNav('driver_trips');
+        } else if (selectedRideForBooking) {
+          setShowBookingModal(true);
+        }
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Registration failed.';
+      setAuthError(msg);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  // Demo Switcher (Instant 1-Click Sandbox Test Helper)
   const handleDemoLogin = (role: 'PASSENGER' | 'DRIVER') => {
     if (role === 'PASSENGER') {
       setCurrentUser(INITIAL_DEMO_PASSENGER);
@@ -1043,8 +1208,8 @@ export default function Home() {
       setActivePassengerNav('find_ride');
       setNotification({
         type: 'success',
-        title: 'Passenger Portal Active',
-        message: 'Signed in as Muhammad Ali. You can now search and book rides.',
+        title: 'Demo Passenger Active',
+        message: 'Signed in as Muhammad Ali (Passenger View).',
       });
     } else {
       setCurrentUser(INITIAL_DEMO_DRIVER);
@@ -1052,18 +1217,31 @@ export default function Home() {
       setActiveDriverNav('driver_trips');
       setNotification({
         type: 'success',
-        title: 'Driver Control Hub Active',
-        message: 'Signed in as Driver Tariq Khan. Managing rides and passenger requests.',
+        title: 'Demo Driver Active',
+        message: 'Signed in as Driver Tariq Khan (Driver Control Hub).',
       });
     }
     setShowAuthModal(false);
   };
 
-  const handleLogout = () => {
+  // Logout (Clears Supabase Session & Local State completely)
+  const handleLogout = async () => {
+    if (supabase) {
+      try {
+        await supabase.auth.signOut();
+      } catch {
+        // Safe ignore
+      }
+    }
     setCurrentUser(null);
     setShowProfileModal(false);
     setPortalMode('PASSENGER');
-    setNotification({ type: 'info', title: 'Signed Out', message: 'You have been signed out of Apni Sawari.' });
+    setActivePassengerNav('find_ride');
+    setNotification({
+      type: 'info',
+      title: 'Signed Out',
+      message: 'You have been signed out of Apni Sawari. Private rides and dashboards are closed.',
+    });
   };
 
   const openSawariRequestsCount = passengerRequests.filter((r) => r.status === 'OPEN').length;
@@ -1073,14 +1251,14 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50/60 text-slate-800 flex flex-col font-sans antialiased selection:bg-emerald-100 selection:text-emerald-900">
+    <div className="min-h-screen bg-slate-50/60 text-slate-800 flex flex-col font-sans antialiased selection:bg-emerald-100 selection:text-emerald-900 pb-20 md:pb-8">
       {/* ========================================================================= */}
-      {/* 1. MINIMALIST TOP APP BAR */}
+      {/* 1. MINIMALIST TOP APP BAR (MOBILE-RESPONSIVE)                             */}
       {/* ========================================================================= */}
       <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-2xs">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
+        <div className="max-w-6xl mx-auto px-3 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-2 sm:gap-4">
           {/* Brand Logo */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => {
@@ -1093,26 +1271,26 @@ export default function Home() {
               }}
               className="flex items-center gap-2 cursor-pointer text-left group"
             >
-              <span className="w-9 h-9 rounded-xl bg-emerald-700 text-white flex items-center justify-center text-lg font-black shadow-xs group-hover:bg-emerald-800 transition">
+              <span className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-emerald-700 text-white flex items-center justify-center text-base sm:text-lg font-black shadow-xs group-hover:bg-emerald-800 transition">
                 🚗
               </span>
               <div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-base font-black tracking-tight text-slate-900 group-hover:text-emerald-800 transition">
+                <div className="flex items-center gap-1 sm:gap-1.5">
+                  <span className="text-sm sm:text-base font-black tracking-tight text-slate-900 group-hover:text-emerald-800 transition">
                     Apni Sawari
                   </span>
-                  <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
-                    {portalMode === 'DRIVER' ? 'DRIVER PANEL' : 'CARPOOL'}
+                  <span className="text-[9px] sm:text-[10px] font-extrabold text-emerald-800 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200 hidden xs:inline">
+                    {portalMode === 'DRIVER' ? 'DRIVER' : 'CARPOOL'}
                   </span>
                 </div>
-                <span className="text-[10px] text-slate-500 font-medium block">
-                  اپنی سواری • Pakistan Nationwide Intercity
+                <span className="text-[9px] sm:text-[10px] text-slate-500 font-medium block truncate max-w-[120px] sm:max-w-none">
+                  اپنی سواری • Intercity Network
                 </span>
               </div>
             </button>
           </div>
 
-          {/* Center Navigation Links - Switch based on Portal Mode */}
+          {/* Desktop Navigation Links */}
           {portalMode === 'PASSENGER' ? (
             <nav className="hidden md:flex items-center gap-1 text-xs font-bold text-slate-600">
               <button
@@ -1149,7 +1327,14 @@ export default function Home() {
 
               <button
                 type="button"
-                onClick={() => setActivePassengerNav('my_bookings')}
+                onClick={() => {
+                  if (!currentUser) {
+                    setAuthTab('SIGNIN');
+                    setShowAuthModal(true);
+                  } else {
+                    setActivePassengerNav('my_bookings');
+                  }
+                }}
                 className={`px-3.5 py-2 rounded-xl transition cursor-pointer relative ${
                   activePassengerNav === 'my_bookings'
                     ? 'text-emerald-900 bg-emerald-50 font-black'
@@ -1223,35 +1408,35 @@ export default function Home() {
           )}
 
           {/* Right Action Controls */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2">
             {/* Mode Switcher Button */}
             {portalMode === 'PASSENGER' ? (
               <button
                 type="button"
                 onClick={handleSwitchToDriverPanel}
-                className="bg-slate-900 hover:bg-black text-white font-bold text-xs px-3.5 py-2 rounded-full transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                className="bg-slate-900 hover:bg-black text-white font-bold text-[11px] sm:text-xs px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-full transition flex items-center gap-1 shadow-2xs cursor-pointer"
                 title="Open Driver Control Dashboard"
               >
-                <span className="text-xs">🚗</span>
+                <span>🚗</span>
                 <span className="hidden sm:inline">Driver Panel</span>
               </button>
             ) : (
               <button
                 type="button"
                 onClick={handleSwitchToPassengerView}
-                className="bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold text-xs px-3.5 py-2 rounded-full transition flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                className="bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold text-[11px] sm:text-xs px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-full transition flex items-center gap-1 cursor-pointer shadow-2xs"
                 title="Return to Passenger Portal"
               >
                 <span>←</span>
-                <span>Passenger View</span>
+                <span className="hidden sm:inline">Passenger View</span>
               </button>
             )}
 
-            {/* Offer a Ride / Post Trip Button */}
+            {/* Offer a Ride Button */}
             <button
               type="button"
               onClick={handleOpenOfferRide}
-              className="border border-emerald-600 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs px-3.5 py-2 rounded-full transition flex items-center gap-1 shadow-2xs cursor-pointer"
+              className="border border-emerald-600 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-[11px] sm:text-xs px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-full transition flex items-center gap-1 shadow-2xs cursor-pointer"
             >
               <span>+</span>
               <span className="hidden sm:inline">Offer a Ride</span>
@@ -1262,25 +1447,26 @@ export default function Home() {
               <button
                 type="button"
                 onClick={() => setShowProfileModal(true)}
-                className="flex items-center gap-1.5 p-1 pl-1.5 pr-2.5 bg-slate-100 hover:bg-slate-200 rounded-full border border-slate-200 transition cursor-pointer"
+                className="flex items-center gap-1 sm:gap-1.5 p-1 pl-1.5 pr-2 sm:pr-2.5 bg-slate-100 hover:bg-slate-200 rounded-full border border-slate-200 transition cursor-pointer"
                 title="Account Settings"
               >
-                <span className="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center text-xs">
+                <span className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-emerald-100 flex items-center justify-center text-xs">
                   {currentUser.avatarUrl || '🧑'}
                 </span>
-                <span className="text-xs font-bold text-slate-800 max-w-[80px] truncate hidden sm:inline">
+                <span className="text-xs font-bold text-slate-800 max-w-[60px] sm:max-w-[80px] truncate hidden xs:inline">
                   {currentUser.name}
                 </span>
-                <span className="text-emerald-600 text-[11px] font-black">✓</span>
+                <span className="text-emerald-600 text-[10px] sm:text-[11px] font-black">✓</span>
               </button>
             ) : (
               <button
                 type="button"
                 onClick={() => {
-                  setAuthView('LOGIN');
+                  setAuthTab('SIGNIN');
+                  setAuthError(null);
                   setShowAuthModal(true);
                 }}
-                className="bg-slate-900 hover:bg-black text-white text-xs font-bold px-3.5 py-2 rounded-full transition cursor-pointer"
+                className="bg-emerald-800 hover:bg-emerald-900 text-white text-[11px] sm:text-xs font-bold px-3 sm:px-3.5 py-1.5 sm:py-2 rounded-full transition cursor-pointer shadow-xs"
               >
                 Sign In
               </button>
@@ -1291,9 +1477,9 @@ export default function Home() {
 
       {/* Notification Toast Alert */}
       {notification && (
-        <div className="max-w-4xl mx-auto px-4 mt-3 w-full">
+        <div className="max-w-4xl mx-auto px-3 sm:px-4 mt-2 sm:mt-3 w-full">
           <div
-            className={`p-3.5 rounded-2xl border flex items-start justify-between shadow-xs transition ${
+            className={`p-3 sm:p-3.5 rounded-2xl border flex items-start justify-between shadow-xs transition ${
               notification.type === 'success'
                 ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
                 : notification.type === 'error'
@@ -1301,8 +1487,8 @@ export default function Home() {
                 : 'bg-blue-50 border-blue-300 text-blue-900'
             }`}
           >
-            <div className="flex gap-2.5">
-              <span className="text-base">
+            <div className="flex gap-2 sm:gap-2.5">
+              <span className="text-sm sm:text-base">
                 {notification.type === 'success' ? '✅' : notification.type === 'error' ? '⚠️' : 'ℹ️'}
               </span>
               <div>
@@ -1321,7 +1507,7 @@ export default function Home() {
       )}
 
       {/* ========================================================================= */}
-      {/* 2. MAIN APPLICATION WORKSPACE */}
+      {/* 2. MAIN APPLICATION WORKSPACE                                             */}
       {/* ========================================================================= */}
       {portalMode === 'PASSENGER' ? (
         /* ========================================================================= */
@@ -1330,9 +1516,9 @@ export default function Home() {
         <div className="flex-1 flex flex-col">
           {/* Passenger Hero & Floating Horizontal Search Capsule */}
           {activePassengerNav === 'find_ride' && (
-            <section className="bg-gradient-to-b from-white via-slate-50 to-slate-50/60 pt-8 pb-10 border-b border-slate-200/70">
-              <div className="max-w-4xl mx-auto px-4 text-center space-y-1.5 mb-6">
-                <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
+            <section className="bg-gradient-to-b from-white via-slate-50 to-slate-50/60 pt-6 sm:pt-8 pb-8 sm:pb-10 border-b border-slate-200/70">
+              <div className="max-w-4xl mx-auto px-4 text-center space-y-1 sm:space-y-1.5 mb-5 sm:mb-6">
+                <h1 className="text-xl sm:text-3xl font-black text-slate-900 tracking-tight leading-tight">
                   Your Pick of Verified Rides at Low Prices
                 </h1>
                 <p className="text-xs sm:text-sm text-slate-600 font-medium max-w-lg mx-auto">
@@ -1340,23 +1526,23 @@ export default function Home() {
                 </p>
               </div>
 
-              {/* Floating Horizontal Search Capsule (BlaBlaCar & Poparide Style) */}
-              <div className="max-w-4xl mx-auto px-4">
+              {/* Floating Mobile-Responsive Search Capsule */}
+              <div className="max-w-4xl mx-auto px-3 sm:px-4">
                 <form
                   onSubmit={handleSearchSubmit}
-                  className="bg-white shadow-lg shadow-slate-200/60 rounded-3xl md:rounded-full border border-slate-200 p-2 flex flex-col md:flex-row items-center gap-1.5"
+                  className="bg-white shadow-lg shadow-slate-200/60 rounded-2xl md:rounded-full border border-slate-200 p-2 sm:p-2.5 flex flex-col md:flex-row items-stretch md:items-center gap-2 md:gap-1.5"
                 >
                   {/* Leaving From */}
-                  <div className="flex-1 w-full px-4 py-2 flex items-center gap-2 hover:bg-slate-50 rounded-2xl md:rounded-full transition">
+                  <div className="flex-1 w-full px-3 py-2 flex items-center gap-2 hover:bg-slate-50 rounded-xl md:rounded-full transition bg-slate-50/50 md:bg-transparent">
                     <span className="text-sm">🟢</span>
                     <div className="w-full text-left">
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      <label className="block text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                         Leaving From
                       </label>
                       <select
                         value={searchOrigin}
                         onChange={(e) => setSearchOrigin(e.target.value)}
-                        className="w-full bg-transparent text-sm font-extrabold text-slate-900 focus:outline-none cursor-pointer"
+                        className="w-full bg-transparent text-xs sm:text-sm font-extrabold text-slate-900 focus:outline-none cursor-pointer"
                       >
                         {NATIONWIDE_CITIES.map((c) => (
                           <option key={c.id} value={c.id}>
@@ -1368,26 +1554,28 @@ export default function Home() {
                   </div>
 
                   {/* Swap Button */}
-                  <button
-                    type="button"
-                    onClick={handleSwapCities}
-                    className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center shrink-0 transition cursor-pointer"
-                    title="Swap Departure and Destination"
-                  >
-                    ⇄
-                  </button>
+                  <div className="flex justify-center md:block">
+                    <button
+                      type="button"
+                      onClick={handleSwapCities}
+                      className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center shrink-0 transition cursor-pointer text-xs"
+                      title="Swap Departure and Destination"
+                    >
+                      ⇄
+                    </button>
+                  </div>
 
                   {/* Going To */}
-                  <div className="flex-1 w-full px-4 py-2 flex items-center gap-2 hover:bg-slate-50 rounded-2xl md:rounded-full transition border-t md:border-t-0 md:border-l border-slate-200">
+                  <div className="flex-1 w-full px-3 py-2 flex items-center gap-2 hover:bg-slate-50 rounded-xl md:rounded-full transition bg-slate-50/50 md:bg-transparent border-t md:border-t-0 md:border-l border-slate-200">
                     <span className="text-sm">🔴</span>
                     <div className="w-full text-left">
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      <label className="block text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                         Going To
                       </label>
                       <select
                         value={searchDest}
                         onChange={(e) => setSearchDest(e.target.value)}
-                        className="w-full bg-transparent text-sm font-extrabold text-slate-900 focus:outline-none cursor-pointer"
+                        className="w-full bg-transparent text-xs sm:text-sm font-extrabold text-slate-900 focus:outline-none cursor-pointer"
                       >
                         {NATIONWIDE_CITIES.map((c) => (
                           <option key={c.id} value={c.id}>
@@ -1399,10 +1587,10 @@ export default function Home() {
                   </div>
 
                   {/* Date */}
-                  <div className="w-full md:w-32 px-4 py-2 flex items-center gap-2 hover:bg-slate-50 rounded-2xl md:rounded-full transition border-t md:border-t-0 md:border-l border-slate-200 text-left">
+                  <div className="w-full md:w-32 px-3 py-2 flex items-center gap-2 hover:bg-slate-50 rounded-xl md:rounded-full transition bg-slate-50/50 md:bg-transparent border-t md:border-t-0 md:border-l border-slate-200 text-left">
                     <span className="text-sm">📅</span>
                     <div>
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      <label className="block text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                         Date
                       </label>
                       <span className="text-xs font-black text-slate-900 block truncate">Today</span>
@@ -1412,15 +1600,15 @@ export default function Home() {
                   {/* Search CTA */}
                   <button
                     type="submit"
-                    className="w-full md:w-auto bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs px-6 py-3.5 rounded-2xl md:rounded-full shadow-xs transition flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+                    className="w-full md:w-auto bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs sm:text-xs px-6 py-3 sm:py-3.5 rounded-xl md:rounded-full shadow-xs transition flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
                   >
                     <span>Find a Ride</span>
                   </button>
                 </form>
 
-                {/* Popular Route Shortcuts */}
-                <div className="mt-3.5 flex items-center justify-center flex-wrap gap-1.5 text-xs">
-                  <span className="text-[11px] text-slate-400 font-bold uppercase mr-1">Popular:</span>
+                {/* Popular Route Shortcuts (Horizontally Scrollable on Mobile) */}
+                <div className="mt-3 flex items-center justify-start sm:justify-center overflow-x-auto gap-1.5 text-xs pb-1 scrollbar-none">
+                  <span className="text-[10px] sm:text-[11px] text-slate-400 font-bold uppercase shrink-0">Popular:</span>
                   <button
                     type="button"
                     onClick={() => {
@@ -1428,7 +1616,7 @@ export default function Home() {
                       setSearchDest('loc-khi');
                       setHasSearched(true);
                     }}
-                    className="px-3 py-1 bg-white hover:bg-emerald-50 hover:text-emerald-900 text-slate-700 rounded-full border border-slate-200 transition font-bold cursor-pointer"
+                    className="px-2.5 py-1 bg-white hover:bg-emerald-50 hover:text-emerald-900 text-slate-700 rounded-full border border-slate-200 transition font-bold cursor-pointer shrink-0 text-[11px]"
                   >
                     Umerkot ➔ Karachi
                   </button>
@@ -1439,7 +1627,7 @@ export default function Home() {
                       setSearchDest('loc-hyd');
                       setHasSearched(true);
                     }}
-                    className="px-3 py-1 bg-white hover:bg-emerald-50 hover:text-emerald-900 text-slate-700 rounded-full border border-slate-200 transition font-bold cursor-pointer"
+                    className="px-2.5 py-1 bg-white hover:bg-emerald-50 hover:text-emerald-900 text-slate-700 rounded-full border border-slate-200 transition font-bold cursor-pointer shrink-0 text-[11px]"
                   >
                     Karachi ➔ Hyderabad
                   </button>
@@ -1450,7 +1638,7 @@ export default function Home() {
                       setSearchDest('loc-isb');
                       setHasSearched(true);
                     }}
-                    className="px-3 py-1 bg-white hover:bg-emerald-50 hover:text-emerald-900 text-slate-700 rounded-full border border-slate-200 transition font-bold cursor-pointer"
+                    className="px-2.5 py-1 bg-white hover:bg-emerald-50 hover:text-emerald-900 text-slate-700 rounded-full border border-slate-200 transition font-bold cursor-pointer shrink-0 text-[11px]"
                   >
                     Lahore ➔ Islamabad
                   </button>
@@ -1461,7 +1649,7 @@ export default function Home() {
                       setSearchDest('loc-lhr');
                       setHasSearched(true);
                     }}
-                    className="px-3 py-1 bg-white hover:bg-emerald-50 hover:text-emerald-900 text-slate-700 rounded-full border border-slate-200 transition font-bold cursor-pointer"
+                    className="px-2.5 py-1 bg-white hover:bg-emerald-50 hover:text-emerald-900 text-slate-700 rounded-full border border-slate-200 transition font-bold cursor-pointer shrink-0 text-[11px]"
                   >
                     Multan ➔ Lahore
                   </button>
@@ -1471,17 +1659,17 @@ export default function Home() {
           )}
 
           {/* Passenger Body Container */}
-          <main className="flex-1 max-w-5xl mx-auto px-4 sm:px-6 py-6 w-full space-y-6">
+          <main className="flex-1 max-w-5xl mx-auto px-3 sm:px-6 py-4 sm:py-6 w-full space-y-5">
             {/* VIEW 1: FIND A RIDE (HORIZONTAL RIDE CARDS) */}
             {activePassengerNav === 'find_ride' && (
               <div className="space-y-4">
-                {/* Filter Chips Bar */}
+                {/* Filter Chips Bar (Mobile scrollable) */}
                 <div className="flex items-center justify-between flex-wrap gap-2 pt-1">
-                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs w-full sm:w-auto scrollbar-none">
                     <button
                       type="button"
                       onClick={() => setActiveTagFilter('ALL')}
-                      className={`px-3 py-1.5 rounded-full font-bold transition whitespace-nowrap cursor-pointer ${
+                      className={`px-3 py-1.5 rounded-full font-bold transition whitespace-nowrap cursor-pointer text-[11px] sm:text-xs shrink-0 ${
                         activeTagFilter === 'ALL'
                           ? 'bg-slate-900 text-white'
                           : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
@@ -1492,7 +1680,7 @@ export default function Home() {
                     <button
                       type="button"
                       onClick={() => setActiveTagFilter('KHALI_WAPSI')}
-                      className={`px-3 py-1.5 rounded-full font-bold transition whitespace-nowrap cursor-pointer ${
+                      className={`px-3 py-1.5 rounded-full font-bold transition whitespace-nowrap cursor-pointer text-[11px] sm:text-xs shrink-0 ${
                         activeTagFilter === 'KHALI_WAPSI'
                           ? 'bg-rose-700 text-white'
                           : 'bg-white text-rose-700 border border-rose-200 hover:bg-rose-50'
@@ -1503,7 +1691,7 @@ export default function Home() {
                     <button
                       type="button"
                       onClick={() => setActiveTagFilter('FAMILY')}
-                      className={`px-3 py-1.5 rounded-full font-bold transition whitespace-nowrap cursor-pointer ${
+                      className={`px-3 py-1.5 rounded-full font-bold transition whitespace-nowrap cursor-pointer text-[11px] sm:text-xs shrink-0 ${
                         activeTagFilter === 'FAMILY'
                           ? 'bg-emerald-700 text-white'
                           : 'bg-white text-emerald-800 border border-emerald-200 hover:bg-emerald-50'
@@ -1514,7 +1702,7 @@ export default function Home() {
                     <button
                       type="button"
                       onClick={() => setActiveTagFilter('MAX_2_BACK')}
-                      className={`px-3 py-1.5 rounded-full font-bold transition whitespace-nowrap cursor-pointer ${
+                      className={`px-3 py-1.5 rounded-full font-bold transition whitespace-nowrap cursor-pointer text-[11px] sm:text-xs shrink-0 ${
                         activeTagFilter === 'MAX_2_BACK'
                           ? 'bg-blue-700 text-white'
                           : 'bg-white text-blue-800 border border-blue-200 hover:bg-blue-50'
@@ -1525,7 +1713,7 @@ export default function Home() {
                     <button
                       type="button"
                       onClick={() => setActiveTagFilter('LADIES_ONLY')}
-                      className={`px-3 py-1.5 rounded-full font-bold transition whitespace-nowrap cursor-pointer ${
+                      className={`px-3 py-1.5 rounded-full font-bold transition whitespace-nowrap cursor-pointer text-[11px] sm:text-xs shrink-0 ${
                         activeTagFilter === 'LADIES_ONLY'
                           ? 'bg-purple-700 text-white'
                           : 'bg-white text-purple-800 border border-purple-200 hover:bg-purple-50'
@@ -1540,7 +1728,7 @@ export default function Home() {
                     onClick={() => setActivePassengerNav('sawari_board')}
                     className="text-xs text-emerald-700 hover:text-emerald-900 font-black flex items-center gap-1 cursor-pointer"
                   >
-                    <span>Can&apos;t find a ride? Post on Sawari Board</span>
+                    <span>Post on Sawari Board</span>
                     <span>➔</span>
                   </button>
                 </div>
@@ -1548,9 +1736,9 @@ export default function Home() {
                 {/* Ride Results Feed */}
                 <div className="space-y-3">
                   {matchingRides.length === 0 ? (
-                    <div className="bg-white p-8 rounded-3xl border border-slate-200 text-center space-y-3 shadow-2xs">
+                    <div className="bg-white p-6 sm:p-8 rounded-2xl sm:rounded-3xl border border-slate-200 text-center space-y-3 shadow-2xs">
                       <span className="text-3xl block">🚗</span>
-                      <h3 className="text-base font-black text-slate-800">
+                      <h3 className="text-sm sm:text-base font-black text-slate-800">
                         No direct scheduled rides found for this route
                       </h3>
                       <p className="text-xs text-slate-500 max-w-md mx-auto">
@@ -1558,11 +1746,7 @@ export default function Home() {
                       </p>
                       <button
                         type="button"
-                        onClick={() => {
-                          setReqOrigin(searchOrigin);
-                          setReqDest(searchDest);
-                          setShowPostRequestModal(true);
-                        }}
+                        onClick={handleOpenPostSawariRequest}
                         className="bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs px-5 py-2.5 rounded-full transition shadow-xs cursor-pointer inline-flex items-center gap-1.5"
                       >
                         <span>📢 Post on Sawari Board</span>
@@ -1579,12 +1763,12 @@ export default function Home() {
                       return (
                         <div
                           key={ride.id}
-                          className="bg-white rounded-2xl border border-slate-200/90 hover:border-slate-300 p-4 sm:p-5 transition shadow-2xs hover:shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4"
+                          className="bg-white rounded-2xl border border-slate-200/90 hover:border-slate-300 p-4 sm:p-5 transition shadow-2xs hover:shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 sm:gap-4"
                         >
-                          {/* Left Column: Driver Info & Photo */}
+                          {/* Driver Info Row */}
                           <div className="flex items-center gap-3 shrink-0">
                             <div className="relative">
-                              <span className="w-12 h-12 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-xl">
+                              <span className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-lg sm:text-xl">
                                 👨‍✈️
                               </span>
                               <span
@@ -1597,38 +1781,37 @@ export default function Home() {
 
                             <div>
                               <div className="flex items-center gap-1.5">
-                                <span className="font-extrabold text-sm text-slate-900">Driver Tariq Khan</span>
+                                <span className="font-extrabold text-xs sm:text-sm text-slate-900">Driver Tariq Khan</span>
                                 <span className="text-[10px] font-black text-amber-900 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">
                                   ★ 4.9
                                 </span>
                               </div>
-                              <span className="text-[11px] text-slate-500 font-medium block">
+                              <span className="text-[10px] sm:text-[11px] text-slate-500 font-medium block">
                                 Toyota Corolla GLi • White
                               </span>
                             </div>
                           </div>
 
                           {/* Center Column: Route & Travel Comfort Tags */}
-                          <div className="flex-1 space-y-2">
+                          <div className="flex-1 space-y-1.5 sm:space-y-2">
                             {/* Schedule Timeline */}
-                            <div className="flex items-center gap-2 text-xs font-bold text-slate-900">
+                            <div className="flex items-center gap-1.5 sm:gap-2 text-xs font-bold text-slate-900 flex-wrap">
                               <span>07:00 AM</span>
-                              <span className="text-slate-400 font-normal">({oName})</span>
-                              <span className="text-slate-300">────────➔</span>
+                              <span className="text-slate-500 font-normal">({oName})</span>
+                              <span className="text-emerald-600 font-black">➔</span>
                               <span>11:30 AM</span>
-                              <span className="text-slate-400 font-normal">({dName})</span>
+                              <span className="text-slate-500 font-normal">({dName})</span>
                             </div>
 
                             {/* Waypoint Dropoffs */}
                             {ride.routeStops && ride.routeStops.length > 0 && (
-                              <p className="text-[11px] text-slate-500 font-medium">
-                                En-route stops:{' '}
-                                {ride.routeStops.map((s) => s.name).join(' • ')}
+                              <p className="text-[10px] sm:text-[11px] text-slate-500 font-medium truncate">
+                                Stops: {ride.routeStops.map((s) => s.name).join(' • ')}
                               </p>
                             )}
 
                             {/* Comfort Tags */}
-                            <div className="flex items-center flex-wrap gap-1 text-[11px]">
+                            <div className="flex items-center flex-wrap gap-1 text-[10px] sm:text-[11px]">
                               {ride.travelComfort?.acType === 'CHILLED_AC' && (
                                 <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md font-semibold">
                                   ❄️ Chilled AC
@@ -1658,15 +1841,15 @@ export default function Home() {
                           </div>
 
                           {/* Right Column: Pricing & Book CTA */}
-                          <div className="w-full md:w-auto flex md:flex-col items-center md:items-end justify-between md:justify-center shrink-0 border-t md:border-t-0 pt-3 md:pt-0 border-slate-100 gap-2">
+                          <div className="w-full md:w-auto flex items-center md:flex-col justify-between md:justify-center shrink-0 border-t md:border-t-0 pt-2.5 md:pt-0 border-slate-100 gap-2">
                             <div className="text-left md:text-right">
-                              <span className="text-xs text-slate-400 font-bold block">Per Seat</span>
+                              <span className="text-[10px] sm:text-xs text-slate-400 font-bold block">Per Seat</span>
                               <div className="flex items-baseline gap-1">
-                                <span className="text-xl font-black text-slate-900">
+                                <span className="text-base sm:text-xl font-black text-slate-900">
                                   Rs. {ride.seatPrice?.toLocaleString()}
                                 </span>
                               </div>
-                              <span className="text-[11px] font-bold text-emerald-700 block">
+                              <span className="text-[10px] sm:text-[11px] font-bold text-emerald-700 block">
                                 {isFull ? 'Sold Out' : `${availableSeats} of ${ride.capacity} seats left`}
                               </span>
                             </div>
@@ -1675,7 +1858,7 @@ export default function Home() {
                               type="button"
                               onClick={() => handleSelectRideForBooking(ride)}
                               disabled={isFull}
-                              className={`px-5 py-2.5 rounded-full font-bold text-xs transition cursor-pointer shadow-xs ${
+                              className={`px-4 sm:px-5 py-2 sm:py-2.5 rounded-full font-bold text-xs transition cursor-pointer shadow-xs ${
                                 isFull
                                   ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
                                   : 'bg-emerald-700 hover:bg-emerald-800 text-white'
@@ -1695,17 +1878,17 @@ export default function Home() {
             {/* VIEW 2: SAWARI BOARD (PASSENGER REVERSE MARKETPLACE) */}
             {activePassengerNav === 'sawari_board' && (
               <div className="space-y-4">
-                <div className="flex items-center justify-between flex-wrap gap-2 bg-white p-5 rounded-2xl border border-slate-200">
+                <div className="flex items-center justify-between flex-wrap gap-2 bg-white p-4 sm:p-5 rounded-2xl border border-slate-200">
                   <div>
-                    <h2 className="text-base font-black text-slate-900">Sawari Request Board</h2>
-                    <p className="text-xs text-slate-500">
+                    <h2 className="text-sm sm:text-base font-black text-slate-900">Sawari Request Board</h2>
+                    <p className="text-[11px] sm:text-xs text-slate-500">
                       Cannot find a ride matching your schedule? Broadcast your itinerary and drivers will submit offers.
                     </p>
                   </div>
 
                   <button
                     type="button"
-                    onClick={() => setShowPostRequestModal(true)}
+                    onClick={handleOpenPostSawariRequest}
                     className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs px-4 py-2 rounded-full transition shadow-xs cursor-pointer flex items-center gap-1.5"
                   >
                     <span>+</span>
@@ -1727,21 +1910,21 @@ export default function Home() {
                       >
                         <div className="flex items-start justify-between">
                           <div className="flex items-center gap-2.5">
-                            <span className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-base">
+                            <span className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-slate-100 flex items-center justify-center text-sm sm:text-base">
                               {req.isFamilyTrip ? '👨‍👩‍👧' : '🧑'}
                             </span>
                             <div>
-                              <span className="font-extrabold text-sm text-slate-900 block">
+                              <span className="font-extrabold text-xs sm:text-sm text-slate-900 block">
                                 {oName} ➔ {dName}
                               </span>
-                              <span className="text-[11px] text-slate-500 font-medium">
+                              <span className="text-[10px] sm:text-[11px] text-slate-500 font-medium">
                                 Requested by {req.passengerName}
                               </span>
                             </div>
                           </div>
 
                           <span
-                            className={`text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase ${
+                            className={`text-[9px] sm:text-[10px] font-black px-2 sm:px-2.5 py-0.5 rounded-full uppercase ${
                               req.status === 'ACCEPTED'
                                 ? 'bg-emerald-100 text-emerald-800'
                                 : 'bg-amber-100 text-amber-800'
@@ -1752,7 +1935,7 @@ export default function Home() {
                         </div>
 
                         {/* Travel tags */}
-                        <div className="flex flex-wrap items-center gap-1 text-[11px]">
+                        <div className="flex flex-wrap items-center gap-1 text-[10px] sm:text-[11px]">
                           <span className="bg-slate-100 text-slate-700 font-medium px-2 py-0.5 rounded-md">
                             📅 {req.travelDate} ({req.desiredTime})
                           </span>
@@ -1780,10 +1963,10 @@ export default function Home() {
                         {/* Budget & Actions Bar */}
                         <div className="flex items-center justify-between pt-2 border-t border-slate-100">
                           <div>
-                            <span className="text-[10px] font-bold text-slate-400 uppercase block">
+                            <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase block">
                               Passenger Budget:
                             </span>
-                            <span className="text-base font-black text-emerald-800">
+                            <span className="text-sm sm:text-base font-black text-emerald-800">
                               Rs. {req.budgetPrice.toLocaleString()}
                             </span>
                             <span className="text-[10px] text-slate-400 font-medium ml-1">(Direct Cash)</span>
@@ -1795,7 +1978,7 @@ export default function Home() {
                               <span className="text-xs text-slate-500 font-medium">
                                 {req.offers.length === 0
                                   ? '⏳ Awaiting Driver Offers'
-                                  : `💬 ${req.offers.length} Offer(s) Received`}
+                                  : `💬 ${req.offers.length} Offer(s)`}
                               </span>
                               {req.status === 'OPEN' && (
                                 <button
@@ -1803,7 +1986,7 @@ export default function Home() {
                                   onClick={() => handleCancelSawariRequest(req.id)}
                                   className="text-xs text-rose-600 hover:text-rose-800 font-bold bg-rose-50 px-2.5 py-1 rounded-lg border border-rose-200 cursor-pointer"
                                 >
-                                  Cancel Request
+                                  Cancel
                                 </button>
                               )}
                             </div>
@@ -1824,7 +2007,7 @@ export default function Home() {
                               {req.offers.map((offer) => (
                                 <div
                                   key={offer.id}
-                                  className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between text-xs"
+                                  className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs"
                                 >
                                   <div>
                                     <div className="flex items-center gap-2">
@@ -1841,7 +2024,7 @@ export default function Home() {
                                     )}
                                   </div>
 
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex items-center justify-between sm:justify-end w-full sm:w-auto gap-2">
                                     <span className="font-black text-sm text-emerald-800">
                                       Rs. {offer.offeredPrice.toLocaleString()}
                                     </span>
@@ -1867,18 +2050,36 @@ export default function Home() {
               </div>
             )}
 
-            {/* VIEW 3: MY BOOKINGS (STRICTLY PASSENGER'S BOOKED RIDES) */}
+            {/* VIEW 3: MY BOOKINGS (AUTH PROTECTED - ONLY SHOWS FOR LOGGED IN USERS) */}
             {activePassengerNav === 'my_bookings' && (
               <div className="space-y-4">
-                <div className="bg-white p-5 rounded-2xl border border-slate-200">
-                  <h2 className="text-base font-black text-slate-900">My Bookings &amp; Tickets</h2>
-                  <p className="text-xs text-slate-500">
+                <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200">
+                  <h2 className="text-sm sm:text-base font-black text-slate-900">My Bookings &amp; Tickets</h2>
+                  <p className="text-[11px] sm:text-xs text-slate-500">
                     Track your reserved seats, boarding terminal points, and direct cash payments due to drivers.
                   </p>
                 </div>
 
-                {myPassengerBookings.length === 0 ? (
-                  <div className="bg-white p-8 rounded-3xl border border-slate-200 text-center space-y-2 shadow-2xs">
+                {!currentUser ? (
+                  <div className="bg-white p-6 sm:p-8 rounded-2xl sm:rounded-3xl border border-slate-200 text-center space-y-3 shadow-2xs">
+                    <span className="text-3xl block">🔒</span>
+                    <h3 className="text-sm sm:text-base font-black text-slate-800">Sign in to view your bookings</h3>
+                    <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                      Access your confirmed tickets, driver phone numbers, and reservation history.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthTab('SIGNIN');
+                        setShowAuthModal(true);
+                      }}
+                      className="bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs px-6 py-2.5 rounded-full transition shadow-xs cursor-pointer inline-block"
+                    >
+                      Sign In / Register
+                    </button>
+                  </div>
+                ) : myPassengerBookings.length === 0 ? (
+                  <div className="bg-white p-6 sm:p-8 rounded-2xl sm:rounded-3xl border border-slate-200 text-center space-y-2 shadow-2xs">
                     <span className="text-3xl block">🎫</span>
                     <h3 className="text-sm font-black text-slate-800">No active bookings yet</h3>
                     <p className="text-xs text-slate-500">
@@ -1905,7 +2106,7 @@ export default function Home() {
                       return (
                         <div
                           key={b.id}
-                          className={`bg-white p-5 rounded-2xl border transition shadow-2xs space-y-3 ${
+                          className={`bg-white p-4 sm:p-5 rounded-2xl border transition shadow-2xs space-y-3 ${
                             b.status === 'ACCEPTED'
                               ? 'border-emerald-300'
                               : b.status === 'PENDING'
@@ -1915,10 +2116,10 @@ export default function Home() {
                         >
                           <div className="flex items-center justify-between">
                             <div>
-                              <span className="text-sm font-black text-slate-900 block">
+                              <span className="text-xs sm:text-sm font-black text-slate-900 block">
                                 {oName} ➔ {dName}
                               </span>
-                              <span className="text-xs text-slate-500 font-medium">
+                              <span className="text-[11px] sm:text-xs text-slate-500 font-medium">
                                 {b.bookingType === 'WHOLE_CAR'
                                   ? b.isRoundTrip
                                     ? '🚗 Full Car (Round-Trip Wait & Return)'
@@ -1928,7 +2129,7 @@ export default function Home() {
                             </div>
 
                             <span
-                              className={`text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase ${
+                              className={`text-[9px] sm:text-[10px] font-black px-2 sm:px-2.5 py-0.5 rounded-full uppercase ${
                                 b.status === 'ACCEPTED'
                                   ? 'bg-emerald-100 text-emerald-800'
                                   : b.status === 'PENDING'
@@ -1943,12 +2144,12 @@ export default function Home() {
                           <div className="text-xs text-slate-600 flex justify-between items-center bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                             <div>
                               <span className="text-slate-400 block text-[10px] uppercase font-bold">Fare Due:</span>
-                              <span className="font-extrabold text-sm text-emerald-900">
+                              <span className="font-extrabold text-xs sm:text-sm text-emerald-900">
                                 Rs. {b.totalPrice.toLocaleString()} (Cash upon boarding)
                               </span>
                             </div>
                             {b.dropoffStopName && (
-                              <span className="text-[11px] font-bold text-slate-700">
+                              <span className="text-[10px] sm:text-[11px] font-bold text-slate-700">
                                 📍 Dropoff: {b.dropoffStopName}
                               </span>
                             )}
@@ -1984,17 +2185,17 @@ export default function Home() {
 
             {/* VIEW 4: HOW IT WORKS */}
             {activePassengerNav === 'how_it_works' && (
-              <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 space-y-6">
+              <div className="bg-white p-5 sm:p-8 rounded-2xl sm:rounded-3xl border border-slate-200 space-y-6">
                 <div className="text-center max-w-xl mx-auto space-y-1">
-                  <h2 className="text-xl font-black text-slate-900">How Apni Sawari Works</h2>
+                  <h2 className="text-lg sm:text-xl font-black text-slate-900">How Apni Sawari Works</h2>
                   <p className="text-xs text-slate-500">
                     A safe, verified carpool network connecting passengers and car owners traveling between cities in Pakistan.
                   </p>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 pt-4">
-                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2">
-                    <span className="w-8 h-8 rounded-full bg-emerald-700 text-white font-black text-xs flex items-center justify-center">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 pt-2 sm:pt-4">
+                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-1.5">
+                    <span className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-emerald-700 text-white font-black text-xs flex items-center justify-center">
                       1
                     </span>
                     <h3 className="font-bold text-xs text-slate-900">Find or Request</h3>
@@ -2003,8 +2204,8 @@ export default function Home() {
                     </p>
                   </div>
 
-                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2">
-                    <span className="w-8 h-8 rounded-full bg-emerald-700 text-white font-black text-xs flex items-center justify-center">
+                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-1.5">
+                    <span className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-emerald-700 text-white font-black text-xs flex items-center justify-center">
                       2
                     </span>
                     <h3 className="font-bold text-xs text-slate-900">Instant Seat or Full Car</h3>
@@ -2013,8 +2214,8 @@ export default function Home() {
                     </p>
                   </div>
 
-                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2">
-                    <span className="w-8 h-8 rounded-full bg-emerald-700 text-white font-black text-xs flex items-center justify-center">
+                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-1.5">
+                    <span className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-emerald-700 text-white font-black text-xs flex items-center justify-center">
                       3
                     </span>
                     <h3 className="font-bold text-xs text-slate-900">Verified Profiles</h3>
@@ -2023,8 +2224,8 @@ export default function Home() {
                     </p>
                   </div>
 
-                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2">
-                    <span className="w-8 h-8 rounded-full bg-emerald-700 text-white font-black text-xs flex items-center justify-center">
+                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-1.5">
+                    <span className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-emerald-700 text-white font-black text-xs flex items-center justify-center">
                       4
                     </span>
                     <h3 className="font-bold text-xs text-slate-900">Direct Cash Settlement</h3>
@@ -2041,18 +2242,18 @@ export default function Home() {
         /* ========================================================================= */
         /* B. DEDICATED DRIVER CONTROL DASHBOARD (SEPARATED FROM PASSENGER UI)        */
         /* ========================================================================= */
-        <div className="flex-1 max-w-6xl mx-auto px-4 sm:px-6 py-6 w-full space-y-6">
+        <div className="flex-1 max-w-6xl mx-auto px-3 sm:px-6 py-4 sm:py-6 w-full space-y-5">
           {/* Driver Top Banner & Quick KPI Bar */}
-          <div className="bg-slate-900 text-white p-6 rounded-3xl shadow-sm space-y-6">
-            <div className="flex items-center justify-between flex-wrap gap-4">
+          <div className="bg-slate-900 text-white p-4 sm:p-6 rounded-2xl sm:rounded-3xl shadow-sm space-y-5">
+            <div className="flex items-center justify-between flex-wrap gap-3">
               <div>
-                <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400 bg-emerald-950/60 px-2.5 py-1 rounded-md border border-emerald-800">
+                <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800">
                   Captain Control Hub
                 </span>
-                <h1 className="text-xl sm:text-2xl font-black mt-2">
+                <h1 className="text-lg sm:text-2xl font-black mt-1.5">
                   Welcome back, {currentUser?.name || 'Captain'}
                 </h1>
-                <p className="text-xs text-slate-400">
+                <p className="text-[11px] sm:text-xs text-slate-400">
                   Vehicle: {currentUser?.vehicle?.makeModel} ({currentUser?.vehicle?.plate}) • City: {currentUser?.city}
                 </p>
               </div>
@@ -2061,57 +2262,57 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={handleOpenOfferRide}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs px-4 py-2.5 rounded-full transition shadow-xs cursor-pointer flex items-center gap-1.5"
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-full transition shadow-xs cursor-pointer flex items-center gap-1.5"
                 >
                   <span>+</span>
-                  <span>Publish New Journey</span>
+                  <span>Publish Journey</span>
                 </button>
               </div>
             </div>
 
-            {/* 4 Metric KPI Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-2 border-t border-slate-800">
-              <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700/60">
-                <span className="text-[10px] font-bold uppercase text-slate-400 block">Active Listings</span>
-                <span className="text-xl font-black text-white">{myDriverRides.length}</span>
-                <span className="text-[10px] text-emerald-400 font-semibold block mt-0.5">Live on Search</span>
+            {/* 4 Metric KPI Cards (Responsive 2x2 on mobile, 4x1 on desktop) */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3 pt-2 border-t border-slate-800">
+              <div className="bg-slate-800/80 p-3 sm:p-3.5 rounded-xl sm:rounded-2xl border border-slate-700/60">
+                <span className="text-[9px] sm:text-[10px] font-bold uppercase text-slate-400 block">Active Listings</span>
+                <span className="text-base sm:text-xl font-black text-white">{myDriverRides.length}</span>
+                <span className="text-[9px] sm:text-[10px] text-emerald-400 font-semibold block mt-0.5">Live on Search</span>
               </div>
 
-              <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700/60">
-                <span className="text-[10px] font-bold uppercase text-slate-400 block">Pending Requests</span>
-                <span className="text-xl font-black text-amber-400">{driverPendingBookings.length}</span>
-                <span className="text-[10px] text-slate-400 font-semibold block mt-0.5">Awaiting your approval</span>
+              <div className="bg-slate-800/80 p-3 sm:p-3.5 rounded-xl sm:rounded-2xl border border-slate-700/60">
+                <span className="text-[9px] sm:text-[10px] font-bold uppercase text-slate-400 block">Pending Requests</span>
+                <span className="text-base sm:text-xl font-black text-amber-400">{driverPendingBookings.length}</span>
+                <span className="text-[9px] sm:text-[10px] text-slate-400 font-semibold block mt-0.5">Awaiting approval</span>
               </div>
 
-              <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700/60">
-                <span className="text-[10px] font-bold uppercase text-slate-400 block">Cash to Collect</span>
-                <span className="text-xl font-black text-emerald-400">
+              <div className="bg-slate-800/80 p-3 sm:p-3.5 rounded-xl sm:rounded-2xl border border-slate-700/60">
+                <span className="text-[9px] sm:text-[10px] font-bold uppercase text-slate-400 block">Cash to Collect</span>
+                <span className="text-base sm:text-xl font-black text-emerald-400 truncate block">
                   Rs. {driverTotalCashDue.toLocaleString()}
                 </span>
-                <span className="text-[10px] text-slate-400 font-semibold block mt-0.5">From confirmed passengers</span>
+                <span className="text-[9px] sm:text-[10px] text-slate-400 font-semibold block mt-0.5">From passengers</span>
               </div>
 
-              <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700/60">
-                <span className="text-[10px] font-bold uppercase text-slate-400 block">Driver Reliability</span>
-                <span className="text-xl font-black text-white">98% ★ 4.9</span>
-                <span className="text-[10px] text-emerald-400 font-semibold block mt-0.5">Top-Rated Captain</span>
+              <div className="bg-slate-800/80 p-3 sm:p-3.5 rounded-xl sm:rounded-2xl border border-slate-700/60">
+                <span className="text-[9px] sm:text-[10px] font-bold uppercase text-slate-400 block">Reliability</span>
+                <span className="text-base sm:text-xl font-black text-white">98% ★ 4.9</span>
+                <span className="text-[9px] sm:text-[10px] text-emerald-400 font-semibold block mt-0.5">Top-Rated Captain</span>
               </div>
             </div>
           </div>
 
-          {/* Sub-navigation Tabs for Driver */}
-          <div className="flex items-center gap-2 border-b border-slate-200 pb-2 text-xs font-bold">
+          {/* Sub-navigation Tabs for Driver (Scrollable horizontally) */}
+          <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-1 text-xs font-bold scrollbar-none">
             <button
               type="button"
               onClick={() => setActiveDriverNav('driver_trips')}
-              className={`px-4 py-2 rounded-xl transition cursor-pointer flex items-center gap-1.5 ${
+              className={`px-3 sm:px-4 py-2 rounded-xl transition cursor-pointer flex items-center gap-1.5 shrink-0 ${
                 activeDriverNav === 'driver_trips'
                   ? 'bg-slate-900 text-white'
                   : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
               }`}
             >
               <span>📋</span>
-              <span>Trips &amp; Passenger Requests</span>
+              <span>Trips &amp; Requests</span>
               {driverPendingBookings.length > 0 && (
                 <span className="px-1.5 py-0.2 bg-amber-500 text-white text-[10px] font-black rounded-full">
                   {driverPendingBookings.length}
@@ -2122,55 +2323,55 @@ export default function Home() {
             <button
               type="button"
               onClick={() => setActiveDriverNav('driver_leads')}
-              className={`px-4 py-2 rounded-xl transition cursor-pointer flex items-center gap-1.5 ${
+              className={`px-3 sm:px-4 py-2 rounded-xl transition cursor-pointer flex items-center gap-1.5 shrink-0 ${
                 activeDriverNav === 'driver_leads'
                   ? 'bg-slate-900 text-white'
                   : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
               }`}
             >
               <span>📢</span>
-              <span>Sawari Board Leads ({openSawariRequestsCount})</span>
+              <span>Sawari Leads ({openSawariRequestsCount})</span>
             </button>
 
             <button
               type="button"
               onClick={() => setActiveDriverNav('driver_vehicle')}
-              className={`px-4 py-2 rounded-xl transition cursor-pointer flex items-center gap-1.5 ${
+              className={`px-3 sm:px-4 py-2 rounded-xl transition cursor-pointer flex items-center gap-1.5 shrink-0 ${
                 activeDriverNav === 'driver_vehicle'
                   ? 'bg-slate-900 text-white'
                   : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
               }`}
             >
               <span>🚙</span>
-              <span>My Vehicle &amp; Settings</span>
+              <span>My Vehicle</span>
             </button>
           </div>
 
           {/* DRIVER SUB-VIEW 1: TRIPS & INCOMING PASSENGER REQUESTS */}
           {activeDriverNav === 'driver_trips' && (
-            <div className="space-y-6">
+            <div className="space-y-5">
               {/* Priority Callout: Incoming Booking Requests Queue */}
               {driverPendingBookings.length > 0 && (
-                <div className="bg-amber-50/80 border border-amber-300 p-5 rounded-2xl space-y-3">
+                <div className="bg-amber-50/80 border border-amber-300 p-4 sm:p-5 rounded-2xl space-y-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <span className="text-lg">📩</span>
-                      <h3 className="text-sm font-black text-amber-950">
-                        Incoming Passenger Booking Requests ({driverPendingBookings.length})
+                      <span className="text-base sm:text-lg">📩</span>
+                      <h3 className="text-xs sm:text-sm font-black text-amber-950">
+                        Incoming Passenger Requests ({driverPendingBookings.length})
                       </h3>
                     </div>
-                    <span className="text-[11px] font-bold text-amber-800">Review to reserve seats</span>
+                    <span className="text-[10px] sm:text-[11px] font-bold text-amber-800">Review to confirm</span>
                   </div>
 
                   <div className="space-y-2">
                     {driverPendingBookings.map((req) => (
                       <div
                         key={req.id}
-                        className="bg-white p-4 rounded-xl border border-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs"
+                        className="bg-white p-3.5 sm:p-4 rounded-xl border border-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs"
                       >
                         <div className="space-y-1">
                           <div className="flex items-center gap-2">
-                            <span className="font-extrabold text-sm text-slate-900">{req.passengerId}</span>
+                            <span className="font-extrabold text-xs sm:text-sm text-slate-900">{req.passengerId}</span>
                             <span className="text-[10px] font-black bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded">
                               {req.bookingType === 'WHOLE_CAR' ? 'Entire Car' : `${req.requestedSeats} Seat(s)`}
                             </span>
@@ -2181,13 +2382,13 @@ export default function Home() {
                           </p>
                         </div>
 
-                        <div className="flex items-center gap-2 shrink-0">
+                        <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end">
                           <button
                             type="button"
                             onClick={() => handleAcceptBooking(req)}
-                            className="bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-2 px-4 rounded-lg transition cursor-pointer shadow-xs"
+                            className="bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-2 px-3 sm:px-4 rounded-lg transition cursor-pointer shadow-xs"
                           >
-                            ✓ Accept Booking
+                            ✓ Accept
                           </button>
                           <button
                             type="button"
@@ -2206,18 +2407,18 @@ export default function Home() {
               {/* Driver's Listed Journeys */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-black text-slate-900">Your Active Scheduled Journeys</h3>
+                  <h3 className="text-xs sm:text-sm font-black text-slate-900">Your Active Scheduled Journeys</h3>
                   <button
                     type="button"
                     onClick={handleOpenOfferRide}
                     className="text-xs text-emerald-700 hover:text-emerald-900 font-bold cursor-pointer"
                   >
-                    + Publish Another Trip
+                    + Publish Trip
                   </button>
                 </div>
 
                 {myDriverRides.length === 0 ? (
-                  <div className="bg-white p-8 rounded-3xl border border-slate-200 text-center space-y-2">
+                  <div className="bg-white p-6 sm:p-8 rounded-2xl sm:rounded-3xl border border-slate-200 text-center space-y-2">
                     <span className="text-3xl block">🛣️</span>
                     <h4 className="text-sm font-bold text-slate-800">You have no active rides listed</h4>
                     <p className="text-xs text-slate-500">
@@ -2242,16 +2443,16 @@ export default function Home() {
                       return (
                         <div
                           key={ride.id}
-                          className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-3"
+                          className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-3"
                         >
                           <div className="flex items-start justify-between">
                             <div>
                               <div className="flex items-center gap-2">
-                                <span className="font-black text-base text-slate-900">
+                                <span className="font-black text-sm sm:text-base text-slate-900">
                                   {oName} ➔ {dName}
                                 </span>
-                                <span className="text-[10px] font-black bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
-                                  Active Listing
+                                <span className="text-[9px] sm:text-[10px] font-black bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                                  Active
                                 </span>
                               </div>
                               <span className="text-xs text-slate-500 font-medium">
@@ -2260,35 +2461,29 @@ export default function Home() {
                             </div>
 
                             <div className="text-right">
-                              <span className="text-xs text-slate-400 font-bold block">Capacity</span>
-                              <span className="text-sm font-black text-slate-900">
-                                {ride.capacity - availableSeats}/{ride.capacity} Seats Filled
+                              <span className="text-[10px] sm:text-xs text-slate-400 font-bold block">Capacity</span>
+                              <span className="text-xs sm:text-sm font-black text-slate-900">
+                                {ride.capacity - availableSeats}/{ride.capacity} Booked
                               </span>
                             </div>
                           </div>
 
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 bg-slate-50 p-3 rounded-xl border border-slate-100 text-xs">
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 bg-slate-50 p-2.5 sm:p-3 rounded-xl border border-slate-100 text-xs">
                             <div>
-                              <span className="text-[10px] text-slate-400 uppercase font-bold block">Single Seat Fare:</span>
+                              <span className="text-[9px] sm:text-[10px] text-slate-400 uppercase font-bold block">Seat Fare:</span>
                               <span className="font-extrabold text-slate-800">Rs. {ride.seatPrice?.toLocaleString()}</span>
                             </div>
                             <div>
-                              <span className="text-[10px] text-slate-400 uppercase font-bold block">Whole Car Deal:</span>
+                              <span className="text-[9px] sm:text-[10px] text-slate-400 uppercase font-bold block">Whole Car:</span>
                               <span className="font-extrabold text-slate-800">Rs. {ride.wholeCarPrice.toLocaleString()}</span>
                             </div>
-                            <div>
-                              <span className="text-[10px] text-slate-400 uppercase font-bold block">Round-Trip Rate:</span>
+                            <div className="col-span-2 sm:col-span-1">
+                              <span className="text-[9px] sm:text-[10px] text-slate-400 uppercase font-bold block">Round-Trip:</span>
                               <span className="font-extrabold text-slate-800">
                                 {ride.roundTripWholeCarPrice ? `Rs. ${ride.roundTripWholeCarPrice.toLocaleString()}` : 'Not offered'}
                               </span>
                             </div>
                           </div>
-
-                          {ride.routeStops && ride.routeStops.length > 0 && (
-                            <p className="text-[11px] text-slate-500 font-medium">
-                              Corridor Dropoffs: {ride.routeStops.map((s) => s.name).join(' ➔ ')}
-                            </p>
-                          )}
                         </div>
                       );
                     })}
@@ -2301,8 +2496,8 @@ export default function Home() {
           {/* DRIVER SUB-VIEW 2: SAWARI BOARD LEADS */}
           {activeDriverNav === 'driver_leads' && (
             <div className="space-y-4">
-              <div className="bg-white p-5 rounded-2xl border border-slate-200">
-                <h3 className="text-base font-black text-slate-900">Live Passenger Ride Requests (Leads)</h3>
+              <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200">
+                <h3 className="text-sm sm:text-base font-black text-slate-900">Live Passenger Requests (Leads)</h3>
                 <p className="text-xs text-slate-500">
                   Passengers seeking rides along nationwide routes. You can accept their budget directly or send a custom quote.
                 </p>
@@ -2317,73 +2512,51 @@ export default function Home() {
                   return (
                     <div
                       key={req.id}
-                      className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-3"
+                      className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-3"
                     >
                       <div className="flex items-start justify-between">
-                        <div className="flex items-center gap-2.5">
-                          <span className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-lg">
+                        <div className="flex items-center gap-2">
+                          <span className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-slate-100 flex items-center justify-center text-base sm:text-lg">
                             {req.isFamilyTrip ? '👨‍👩‍👧' : '🧑'}
                           </span>
                           <div>
-                            <span className="font-black text-base text-slate-900 block">
+                            <span className="font-black text-sm sm:text-base text-slate-900 block">
                               {oName} ➔ {dName}
                             </span>
-                            <span className="text-xs text-slate-500 font-medium">
-                              Passenger: {req.passengerName} • Date: {req.travelDate} ({req.desiredTime})
+                            <span className="text-[11px] text-slate-500 font-medium">
+                              {req.passengerName} • {req.travelDate} ({req.desiredTime})
                             </span>
                           </div>
                         </div>
 
                         <div className="text-right">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase block">Passenger Budget</span>
-                          <span className="text-lg font-black text-emerald-800">
+                          <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase block">Budget</span>
+                          <span className="text-base sm:text-lg font-black text-emerald-800">
                             Rs. {req.budgetPrice.toLocaleString()}
                           </span>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 text-xs">
-                        <span className="bg-slate-100 text-slate-700 font-bold px-2 py-0.5 rounded">
-                          {req.bookingType === 'WHOLE_CAR' ? '🚗 Full Car Required' : `💺 ${req.seatsCount} Seats`}
-                        </span>
-                        {req.isFamilyTrip && (
-                          <span className="bg-purple-50 text-purple-800 font-bold px-2 py-0.5 rounded border border-purple-200">
-                            👨‍👩‍👧 Family Onboard
-                          </span>
-                        )}
-                        {req.acRequired && (
-                          <span className="bg-slate-100 text-slate-700 font-medium px-2 py-0.5 rounded">
-                            ❄️ AC Required
-                          </span>
-                        )}
-                      </div>
-
-                      {req.notes && (
-                        <p className="text-xs text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-100 italic">
-                          &quot;{req.notes}&quot;
-                        </p>
-                      )}
-
                       <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
                         {alreadyOffered ? (
                           <span className="text-xs font-bold text-emerald-800 bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-200">
-                            ✓ Your Quote Has Been Sent
+                            ✓ Quote Sent
                           </span>
                         ) : (
                           <>
                             <button
                               type="button"
                               onClick={() => handleDriverAcceptBudget(req)}
-                              className="bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-2 px-3.5 rounded-xl transition cursor-pointer shadow-xs"
+                              className="bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-2 px-3 sm:px-3.5 rounded-xl transition cursor-pointer shadow-xs"
                             >
-                              ⚡ Accept Budget (Rs. {req.budgetPrice.toLocaleString()})
+                              ⚡ Accept Budget
                             </button>
                             <button
                               type="button"
                               onClick={() => handleOpenCustomOfferModal(req)}
                               className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs py-2 px-3 rounded-xl transition cursor-pointer"
                             >
-                              Send Counter-Offer
+                              Counter-Offer
                             </button>
                           </>
                         )}
@@ -2397,15 +2570,15 @@ export default function Home() {
 
           {/* DRIVER SUB-VIEW 3: VEHICLE & SETTINGS */}
           {activeDriverNav === 'driver_vehicle' && (
-            <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 space-y-6">
+            <div className="bg-white p-5 sm:p-8 rounded-2xl sm:rounded-3xl border border-slate-200 space-y-6">
               <div>
-                <h3 className="text-base font-black text-slate-900">Vehicle Specifications &amp; Driver Details</h3>
+                <h3 className="text-sm sm:text-base font-black text-slate-900">Vehicle Specifications &amp; Driver Details</h3>
                 <p className="text-xs text-slate-500">
                   Keep your vehicle information and emergency contacts accurate for passenger safety.
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
                 <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
                   <span className="text-[10px] font-bold text-slate-400 uppercase block">Registered Vehicle</span>
                   <div className="flex items-center justify-between">
@@ -2416,10 +2589,6 @@ export default function Home() {
                     <span className="text-xs font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded">
                       {currentUser?.vehicle?.capacity} Passengers
                     </span>
-                  </div>
-                  <div className="text-xs text-slate-600 flex items-center gap-3 pt-2">
-                    <span>❄️ AC: {currentUser?.vehicle?.hasAc ? 'Yes (Chilled)' : 'No'}</span>
-                    <span>🎨 Color: {currentUser?.vehicle?.color}</span>
                   </div>
                 </div>
 
@@ -2434,9 +2603,6 @@ export default function Home() {
                       ✓ VERIFIED
                     </span>
                   </div>
-                  <p className="text-[11px] text-slate-500 pt-2">
-                    Emergency Contact: {currentUser?.emergencyContact || '0300-1122334'}
-                  </p>
                 </div>
               </div>
 
@@ -2455,13 +2621,387 @@ export default function Home() {
       )}
 
       {/* ========================================================================= */}
-      {/* 3. MODALS (BOOKING, OFFER RIDE, SAWARI REQUEST, PROFILE, AUTH)             */}
+      {/* 3. MOBILE BOTTOM NAVIGATION BAR (md:hidden)                               */}
+      {/* ========================================================================= */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 py-1.5 px-2 flex items-center justify-around text-center shadow-lg">
+        <button
+          type="button"
+          onClick={() => {
+            if (portalMode === 'DRIVER') setPortalMode('PASSENGER');
+            setActivePassengerNav('find_ride');
+          }}
+          className={`flex flex-col items-center justify-center p-1 rounded-xl transition cursor-pointer ${
+            portalMode === 'PASSENGER' && activePassengerNav === 'find_ride' ? 'text-emerald-800 font-black' : 'text-slate-500'
+          }`}
+        >
+          <span className="text-base">🔍</span>
+          <span className="text-[10px] mt-0.5">Find Ride</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            if (portalMode === 'DRIVER') setPortalMode('PASSENGER');
+            setActivePassengerNav('sawari_board');
+          }}
+          className={`flex flex-col items-center justify-center p-1 rounded-xl transition cursor-pointer relative ${
+            portalMode === 'PASSENGER' && activePassengerNav === 'sawari_board' ? 'text-emerald-800 font-black' : 'text-slate-500'
+          }`}
+        >
+          <span className="text-base">📢</span>
+          <span className="text-[10px] mt-0.5">Board</span>
+          {openSawariRequestsCount > 0 && (
+            <span className="absolute top-0 right-1 w-3.5 h-3.5 bg-emerald-600 text-white rounded-full text-[9px] flex items-center justify-center font-bold">
+              {openSawariRequestsCount}
+            </span>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={handleOpenOfferRide}
+          className="flex flex-col items-center justify-center p-1 rounded-xl transition cursor-pointer text-emerald-700 font-bold"
+        >
+          <span className="w-8 h-8 rounded-full bg-emerald-700 text-white flex items-center justify-center text-sm font-black shadow-xs">
+            +
+          </span>
+          <span className="text-[10px] mt-0.5 text-slate-800 font-bold">Offer</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            if (!currentUser) {
+              setAuthTab('SIGNIN');
+              setShowAuthModal(true);
+            } else if (portalMode === 'DRIVER') {
+              setActiveDriverNav('driver_trips');
+            } else {
+              setActivePassengerNav('my_bookings');
+            }
+          }}
+          className={`flex flex-col items-center justify-center p-1 rounded-xl transition cursor-pointer relative ${
+            (portalMode === 'PASSENGER' && activePassengerNav === 'my_bookings') || (portalMode === 'DRIVER' && activeDriverNav === 'driver_trips')
+              ? 'text-emerald-800 font-black'
+              : 'text-slate-500'
+          }`}
+        >
+          <span className="text-base">{portalMode === 'DRIVER' ? '📋' : '🎟️'}</span>
+          <span className="text-[10px] mt-0.5">{portalMode === 'DRIVER' ? 'My Trips' : 'Bookings'}</span>
+          {myPassengerBookings.length > 0 && (
+            <span className="absolute top-0 right-1 w-3.5 h-3.5 bg-emerald-700 text-white rounded-full text-[9px] flex items-center justify-center font-bold">
+              {myPassengerBookings.length}
+            </span>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            if (currentUser) {
+              setShowProfileModal(true);
+            } else {
+              setAuthTab('SIGNIN');
+              setAuthError(null);
+              setShowAuthModal(true);
+            }
+          }}
+          className="flex flex-col items-center justify-center p-1 rounded-xl transition cursor-pointer text-slate-500"
+        >
+          <span className="text-base">{currentUser ? (currentUser.avatarUrl || '🧑') : '👤'}</span>
+          <span className="text-[10px] mt-0.5">{currentUser ? 'Profile' : 'Sign In'}</span>
+        </button>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* 4. MODALS (AUTHENTICATION, BOOKING, OFFER RIDE, SAWARI REQUEST, PROFILE)  */}
       {/* ========================================================================= */}
 
-      {/* MODAL 1: PASSENGER BOOKING DIALOG */}
+      {/* MODAL 1: REAL SUPABASE AUTHENTICATION DIALOG */}
+      {showAuthModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white w-full max-w-md rounded-2xl sm:rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-base font-black text-slate-900">
+                  {authTab === 'SIGNIN' ? 'Sign In to Apni Sawari' : authTab === 'SIGNUP' ? 'Create Your Account' : 'Test Sandbox Profiles'}
+                </h3>
+                <p className="text-xs text-slate-500">
+                  {isSupabaseConfigured ? 'Connected to Supabase Authentication' : 'Supabase Live Auth'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAuthModal(false);
+                  setAuthError(null);
+                }}
+                className="text-slate-400 hover:text-slate-600 text-sm font-bold cursor-pointer p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Auth Tab Selector */}
+            <div className="flex rounded-xl bg-slate-100 p-1 text-xs font-bold text-slate-600">
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthTab('SIGNIN');
+                  setAuthError(null);
+                }}
+                className={`flex-1 py-1.5 rounded-lg transition cursor-pointer ${
+                  authTab === 'SIGNIN' ? 'bg-white text-slate-900 shadow-xs' : 'hover:text-slate-900'
+                }`}
+              >
+                Sign In
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthTab('SIGNUP');
+                  setAuthError(null);
+                }}
+                className={`flex-1 py-1.5 rounded-lg transition cursor-pointer ${
+                  authTab === 'SIGNUP' ? 'bg-white text-slate-900 shadow-xs' : 'hover:text-slate-900'
+                }`}
+              >
+                Register
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthTab('DEMO');
+                  setAuthError(null);
+                }}
+                className={`flex-1 py-1.5 rounded-lg transition cursor-pointer ${
+                  authTab === 'DEMO' ? 'bg-white text-slate-900 shadow-xs' : 'hover:text-slate-900'
+                }`}
+              >
+                ⚡ Fast Demo
+              </button>
+            </div>
+
+            {authError && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold">
+                ⚠️ {authError}
+              </div>
+            )}
+
+            {/* TAB 1: SIGN IN FORM (SUPABASE) */}
+            {authTab === 'SIGNIN' && (
+              <form onSubmit={handleSupabaseSignIn} className="space-y-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Email Address</label>
+                  <input
+                    type="email"
+                    required
+                    value={authEmail}
+                    onChange={(e) => setAuthEmail(e.target.value)}
+                    placeholder="e.g. gotamjee@gmail.com"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold focus:outline-none focus:border-emerald-600"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Password</label>
+                  <input
+                    type="password"
+                    required
+                    value={authPassword}
+                    onChange={(e) => setAuthPassword(e.target.value)}
+                    placeholder="Enter your password"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold focus:outline-none focus:border-emerald-600"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={authLoading}
+                  className="w-full bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-black text-xs py-3 rounded-full transition shadow-xs cursor-pointer mt-2"
+                >
+                  {authLoading ? 'Signing in with Supabase...' : 'Sign In ➔'}
+                </button>
+
+                <p className="text-center text-[11px] text-slate-500 pt-1">
+                  Don&apos;t have an account?{' '}
+                  <button
+                    type="button"
+                    onClick={() => setAuthTab('SIGNUP')}
+                    className="text-emerald-700 font-bold hover:underline"
+                  >
+                    Create Account
+                  </button>
+                </p>
+              </form>
+            )}
+
+            {/* TAB 2: SIGN UP / REGISTER FORM (SUPABASE) */}
+            {authTab === 'SIGNUP' && (
+              <form onSubmit={handleSupabaseSignUp} className="space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Full Name</label>
+                    <input
+                      type="text"
+                      required
+                      value={authName}
+                      onChange={(e) => setAuthName(e.target.value)}
+                      placeholder="e.g. Ali Ahmed"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-600"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Phone Number</label>
+                    <input
+                      type="tel"
+                      required
+                      value={authPhone}
+                      onChange={(e) => setAuthPhone(e.target.value)}
+                      placeholder="0300-1234567"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-600"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Email Address</label>
+                  <input
+                    type="email"
+                    required
+                    value={authEmail}
+                    onChange={(e) => setAuthEmail(e.target.value)}
+                    placeholder="name@example.com"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-600"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Password</label>
+                  <input
+                    type="password"
+                    required
+                    value={authPassword}
+                    onChange={(e) => setAuthPassword(e.target.value)}
+                    placeholder="Create a strong password (min 6 chars)"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-600"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">How will you use Apni Sawari?</label>
+                  <div className="grid grid-cols-2 gap-2 text-xs font-bold">
+                    <button
+                      type="button"
+                      onClick={() => setAuthRole('PASSENGER')}
+                      className={`p-2.5 rounded-xl border text-center transition cursor-pointer ${
+                        authRole === 'PASSENGER'
+                          ? 'bg-emerald-50 border-emerald-600 text-emerald-950 font-black'
+                          : 'bg-white border-slate-200 text-slate-700'
+                      }`}
+                    >
+                      <span className="block text-base">🧑</span>
+                      <span>I am a Passenger</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAuthRole('DRIVER')}
+                      className={`p-2.5 rounded-xl border text-center transition cursor-pointer ${
+                        authRole === 'DRIVER'
+                          ? 'bg-emerald-50 border-emerald-600 text-emerald-950 font-black'
+                          : 'bg-white border-slate-200 text-slate-700'
+                      }`}
+                    >
+                      <span className="block text-base">🚗</span>
+                      <span>I am a Driver (Have Car)</span>
+                    </button>
+                  </div>
+                </div>
+
+                {authRole === 'DRIVER' && (
+                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                    <span className="text-[11px] font-bold text-slate-700 block">Vehicle Information</span>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        required
+                        value={authCarModel}
+                        onChange={(e) => setAuthCarModel(e.target.value)}
+                        placeholder="Car Model (e.g. Corolla)"
+                        className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold"
+                      />
+                      <input
+                        type="text"
+                        required
+                        value={authCarPlate}
+                        onChange={(e) => setAuthCarPlate(e.target.value)}
+                        placeholder="Plate (e.g. LEB-4592)"
+                        className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={authLoading}
+                  className="w-full bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-black text-xs py-3 rounded-full transition shadow-xs cursor-pointer mt-2"
+                >
+                  {authLoading ? 'Registering with Supabase...' : 'Create Account ➔'}
+                </button>
+              </form>
+            )}
+
+            {/* TAB 3: DEMO TEST ACCOUNTS (OPTIONAL TEST HELPER) */}
+            {authTab === 'DEMO' && (
+              <div className="space-y-3">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                  Select a Sandbox Test Persona:
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => handleDemoLogin('PASSENGER')}
+                  className="w-full p-3.5 bg-slate-50 hover:bg-emerald-50 hover:border-emerald-300 rounded-2xl border border-slate-200 text-left transition flex items-center justify-between cursor-pointer group"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-2xl">👨‍💼</span>
+                    <div>
+                      <span className="font-extrabold text-xs text-slate-900 group-hover:text-emerald-900 block">
+                        Muhammad Ali (Passenger View)
+                      </span>
+                      <span className="text-[11px] text-slate-500">Book seats &amp; post on Sawari Board</span>
+                    </div>
+                  </div>
+                  <span className="text-xs font-bold text-emerald-700">Enter ➔</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleDemoLogin('DRIVER')}
+                  className="w-full p-3.5 bg-slate-50 hover:bg-emerald-50 hover:border-emerald-300 rounded-2xl border border-slate-200 text-left transition flex items-center justify-between cursor-pointer group"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-2xl">👨‍✈️</span>
+                    <div>
+                      <span className="font-extrabold text-xs text-slate-900 group-hover:text-emerald-900 block">
+                        Driver Tariq Khan (Driver Control Hub)
+                      </span>
+                      <span className="text-[11px] text-slate-500">Manage trips, car &amp; accept bookings</span>
+                    </div>
+                  </div>
+                  <span className="text-xs font-bold text-emerald-700">Enter ➔</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 2: PASSENGER BOOKING DIALOG */}
       {showBookingModal && selectedRideForBooking && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-lg rounded-3xl p-6 border border-slate-200 shadow-xl space-y-4">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white w-full max-w-lg rounded-2xl sm:rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <h3 className="text-base font-black text-slate-900">Confirm Your Booking</h3>
@@ -2473,7 +3013,7 @@ export default function Home() {
               <button
                 type="button"
                 onClick={() => setShowBookingModal(false)}
-                className="text-slate-400 hover:text-slate-600 text-sm font-bold cursor-pointer"
+                className="text-slate-400 hover:text-slate-600 text-sm font-bold cursor-pointer p-1"
               >
                 ✕
               </button>
@@ -2585,7 +3125,7 @@ export default function Home() {
             <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
               <div>
                 <span className="text-[10px] uppercase font-bold text-slate-400 block">Total Payable</span>
-                <span className="text-lg font-black text-emerald-800">
+                <span className="text-base sm:text-lg font-black text-emerald-800">
                   Rs.{' '}
                   {bookingModeChoice === 'WHOLE_CAR'
                     ? (bookingIsRoundTrip ? (selectedRideForBooking.roundTripWholeCarPrice || Math.round(selectedRideForBooking.wholeCarPrice * 1.65)) : selectedRideForBooking.wholeCarPrice).toLocaleString()
@@ -2597,7 +3137,7 @@ export default function Home() {
               <button
                 type="button"
                 onClick={handleConfirmBooking}
-                className="bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs px-6 py-3 rounded-full transition shadow-xs cursor-pointer"
+                className="bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs px-5 sm:px-6 py-2.5 sm:py-3 rounded-full transition shadow-xs cursor-pointer"
               >
                 Send Request to Driver
               </button>
@@ -2606,10 +3146,10 @@ export default function Home() {
         </div>
       )}
 
-      {/* MODAL 2: OFFER A RIDE / TRIP SETUP */}
+      {/* MODAL 3: OFFER A RIDE / TRIP SETUP */}
       {showOfferRideModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-lg rounded-3xl p-6 border border-slate-200 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white w-full max-w-lg rounded-2xl sm:rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <h3 className="text-base font-black text-slate-900">
@@ -2624,7 +3164,7 @@ export default function Home() {
               <button
                 type="button"
                 onClick={() => setShowOfferRideModal(false)}
-                className="text-slate-400 hover:text-slate-600 text-sm font-bold cursor-pointer"
+                className="text-slate-400 hover:text-slate-600 text-sm font-bold cursor-pointer p-1"
               >
                 ✕
               </button>
@@ -2776,10 +3316,10 @@ export default function Home() {
         </div>
       )}
 
-      {/* MODAL 3: POST ON SAWARI BOARD (PASSENGER) */}
+      {/* MODAL 4: POST ON SAWARI BOARD (PASSENGER) */}
       {showPostRequestModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-lg rounded-3xl p-6 border border-slate-200 shadow-xl space-y-4">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white w-full max-w-lg rounded-2xl sm:rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <h3 className="text-base font-black text-slate-900">Post Ride Request</h3>
@@ -2790,7 +3330,7 @@ export default function Home() {
               <button
                 type="button"
                 onClick={() => setShowPostRequestModal(false)}
-                className="text-slate-400 hover:text-slate-600 text-sm font-bold cursor-pointer"
+                className="text-slate-400 hover:text-slate-600 text-sm font-bold cursor-pointer p-1"
               >
                 ✕
               </button>
@@ -2830,7 +3370,7 @@ export default function Home() {
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Your Target Budget (PKR)</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Target Budget (PKR)</label>
                   <input
                     type="number"
                     required
@@ -2874,10 +3414,10 @@ export default function Home() {
         </div>
       )}
 
-      {/* MODAL 4: DRIVER COUNTER-OFFER MODAL */}
+      {/* MODAL 5: DRIVER COUNTER-OFFER MODAL */}
       {selectedReqForOffer && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-md rounded-3xl p-6 border border-slate-200 shadow-xl space-y-4">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white w-full max-w-md rounded-2xl sm:rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <h3 className="text-base font-black text-slate-900">Send Offer to Passenger</h3>
@@ -2888,7 +3428,7 @@ export default function Home() {
               <button
                 type="button"
                 onClick={() => setSelectedReqForOffer(null)}
-                className="text-slate-400 hover:text-slate-600 text-sm font-bold cursor-pointer"
+                className="text-slate-400 hover:text-slate-600 text-sm font-bold cursor-pointer p-1"
               >
                 ✕
               </button>
@@ -2928,10 +3468,10 @@ export default function Home() {
         </div>
       )}
 
-      {/* MODAL 5: USER PROFILE & CAR MODAL */}
+      {/* MODAL 6: USER PROFILE & CAR MODAL */}
       {showProfileModal && currentUser && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-lg rounded-3xl p-6 border border-slate-200 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white w-full max-w-lg rounded-2xl sm:rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <h3 className="text-base font-black text-slate-900">Profile &amp; Settings</h3>
@@ -2940,7 +3480,7 @@ export default function Home() {
               <button
                 type="button"
                 onClick={() => setShowProfileModal(false)}
-                className="text-slate-400 hover:text-slate-600 text-sm font-bold cursor-pointer"
+                className="text-slate-400 hover:text-slate-600 text-sm font-bold cursor-pointer p-1"
               >
                 ✕
               </button>
@@ -3027,69 +3567,8 @@ export default function Home() {
         </div>
       )}
 
-      {/* MODAL 6: AUTH & DEMO SWITCHER DIALOG */}
-      {showAuthModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-md rounded-3xl p-6 border border-slate-200 shadow-xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div>
-                <h3 className="text-base font-black text-slate-900">Sign In to Apni Sawari</h3>
-                <p className="text-xs text-slate-500">Fast 1-click test accounts or email sign in</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowAuthModal(false)}
-                className="text-slate-400 hover:text-slate-600 text-sm font-bold cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
-                Instant Demo Profiles:
-              </span>
-
-              <button
-                type="button"
-                onClick={() => handleDemoLogin('PASSENGER')}
-                className="w-full p-3.5 bg-slate-50 hover:bg-emerald-50 hover:border-emerald-300 rounded-2xl border border-slate-200 text-left transition flex items-center justify-between cursor-pointer group"
-              >
-                <div className="flex items-center gap-2.5">
-                  <span className="text-2xl">👨‍💼</span>
-                  <div>
-                    <span className="font-extrabold text-xs text-slate-900 group-hover:text-emerald-900 block">
-                      Muhammad Ali (Passenger View)
-                    </span>
-                    <span className="text-[11px] text-slate-500">Book seats &amp; post on Sawari Board</span>
-                  </div>
-                </div>
-                <span className="text-xs font-bold text-emerald-700">Enter ➔</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleDemoLogin('DRIVER')}
-                className="w-full p-3.5 bg-slate-50 hover:bg-emerald-50 hover:border-emerald-300 rounded-2xl border border-slate-200 text-left transition flex items-center justify-between cursor-pointer group"
-              >
-                <div className="flex items-center gap-2.5">
-                  <span className="text-2xl">👨‍✈️</span>
-                  <div>
-                    <span className="font-extrabold text-xs text-slate-900 group-hover:text-emerald-900 block">
-                      Driver Tariq Khan (Driver Panel)
-                    </span>
-                    <span className="text-[11px] text-slate-500">Manage trips, car &amp; accept bookings</span>
-                  </div>
-                </div>
-                <span className="text-xs font-bold text-emerald-700">Enter ➔</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* ========================================================================= */}
-      {/* 4. FOOTER                                                                 */}
+      {/* 5. FOOTER                                                                 */}
       {/* ========================================================================= */}
       <footer className="bg-white border-t border-slate-200 py-6 text-xs text-slate-500">
         <div className="max-w-6xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left">
