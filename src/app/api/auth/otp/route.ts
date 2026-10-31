@@ -284,9 +284,11 @@ export async function POST(request: Request) {
       });
 
       // WebOTP standard format for native Android/iOS auto-fill
-      const smsBody = `Your ReturnRide verification code is: ${otpCode}\n\n@returnride.vercel.app #${otpCode}`;
+      const smsBody = `Your Apni Sawari verification code is: ${otpCode}\n\n@returnride.vercel.app #${otpCode}`;
 
-      // Check for external SMS Gateway (Twilio / HTTP Gateway)
+      // Check for external SMS Gateways (TextBee Free Android SIM Gateway / Twilio / Custom HTTP)
+      const textBeeApiKey = process.env.TEXTBEE_API_KEY;
+      const textBeeDeviceId = process.env.TEXTBEE_DEVICE_ID;
       const twilioSid = process.env.TWILIO_ACCOUNT_SID;
       const twilioAuth = process.env.TWILIO_AUTH_TOKEN;
       const twilioFrom = process.env.TWILIO_PHONE_NUMBER;
@@ -294,7 +296,33 @@ export async function POST(request: Request) {
 
       let sentViaGateway = false;
 
-      if (twilioSid && twilioAuth && twilioFrom) {
+      // 1. TextBee Free Open-Source Android SMS Gateway (100% Free via Android SIM package)
+      if (textBeeApiKey && textBeeDeviceId) {
+        try {
+          const tbRes = await fetch(
+            `https://api.textbee.dev/api/v1/gateway/devices/${textBeeDeviceId}/send-sms`,
+            {
+              method: 'POST',
+              headers: {
+                'x-api-key': textBeeApiKey,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                recipients: [normalized],
+                message: `Apni Sawari (اپنی سواری) Verification Code: ${otpCode}\nValid for 10 mins.`,
+              }),
+            }
+          );
+          if (tbRes.ok) {
+            sentViaGateway = true;
+          }
+        } catch (tbErr) {
+          console.error('[Apni Sawari SMS] TextBee Gateway error:', tbErr);
+        }
+      }
+
+      // 2. Twilio Gateway (Optional Paid Gateway)
+      if (!sentViaGateway && twilioSid && twilioAuth && twilioFrom) {
         try {
           const authHeader = 'Basic ' + Buffer.from(`${twilioSid}:${twilioAuth}`).toString('base64');
           const twilioRes = await fetch(
@@ -318,7 +346,7 @@ export async function POST(request: Request) {
         } catch (twilioErr) {
           console.error('[ReturnRide SMS Gateway] Twilio error:', twilioErr);
         }
-      } else if (genericSmsUrl) {
+      } else if (!sentViaGateway && genericSmsUrl) {
         try {
           const gwRes = await fetch(genericSmsUrl, {
             method: 'POST',

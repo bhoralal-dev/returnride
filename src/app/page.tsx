@@ -1088,35 +1088,98 @@ export default function Home() {
         if (!norm.valid) {
           throw new Error('Please enter a valid Pakistani mobile number (e.g. 0333 1234567).');
         }
-        if (!authPassword) {
-          throw new Error('Please enter your password.');
-        }
 
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email: norm.internalEmail,
-          password: authPassword,
-        });
-
-        if (error) {
-          if (error.message.toLowerCase().includes('invalid login')) {
-            throw new Error('Invalid mobile number or password. If you don\'t have an account yet, please click "Create Account".');
+        if (authMethod === 'PASSWORD') {
+          if (!authPassword) {
+            throw new Error('Please enter your password.');
           }
-          throw error;
-        }
 
-        if (data.user) {
-          const profile = mapSupabaseUserToProfile(data.user);
-          setCurrentUser(profile);
-          setShowAuthModal(false);
-          setAuthPassword('');
-          setNotification({
-            type: 'success',
-            title: 'Welcome Back!',
-            message: `Signed in as ${profile.name} (${norm.display}).`,
+          const { data, error } = await supabase.auth.signInWithPassword({
+            email: norm.internalEmail,
+            password: authPassword,
           });
 
-          if (selectedRideForBooking) {
-            setShowBookingModal(true);
+          if (error) {
+            if (error.message.toLowerCase().includes('invalid login')) {
+              throw new Error('Invalid mobile number or password. If you don\'t have an account yet, please click "Create Account".');
+            }
+            throw error;
+          }
+
+          if (data.user) {
+            const profile = mapSupabaseUserToProfile(data.user);
+            setCurrentUser(profile);
+            setShowAuthModal(false);
+            setAuthPassword('');
+            setNotification({
+              type: 'success',
+              title: 'Welcome Back!',
+              message: `Signed in as ${profile.name} (${norm.display}).`,
+            });
+
+            if (selectedRideForBooking) {
+              setShowBookingModal(true);
+            }
+          }
+        } else {
+          // SMS OTP Method
+          if (!otpSent) {
+            const res = await fetch('/api/auth/otp', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'send_sms', phone: norm.formatted }),
+            });
+            const json = await res.json();
+            if (!res.ok || !json.success) {
+              throw new Error(json.error || 'Failed to dispatch SMS code.');
+            }
+            setOtpToken(json.token || '');
+            setOtpSent(true);
+            setNotification({
+              type: 'success',
+              title: 'SMS Code Dispatched!',
+              message: `A 6-digit verification code has been dispatched via SMS to ${norm.display}.`,
+            });
+          } else {
+            const res = await fetch('/api/auth/otp', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                action: 'verify_sms',
+                phone: norm.formatted,
+                code: otpCode.trim(),
+                token: otpToken,
+              }),
+            });
+            const json = await res.json();
+            if (!res.ok || !json.success) {
+              throw new Error(json.error || 'Invalid or expired verification code.');
+            }
+
+            // Successfully verified!
+            const profile: AppUserProfile = {
+              id: `usr-ph-${norm.digits.slice(-8)}`,
+              name: `User ${norm.display.slice(-4)}`,
+              email: '',
+              phone: norm.display,
+              role: 'PASSENGER',
+              avatarUrl: '🧑',
+              city: 'Karachi',
+              verificationStatus: 'VERIFIED',
+            };
+            setCurrentUser(profile);
+            setShowAuthModal(false);
+            setOtpSent(false);
+            setOtpCode('');
+            setNotification({
+              type: 'success',
+              title: 'Mobile Verified!',
+              message: `Logged in with ${norm.display}.`,
+            });
+
+            if (selectedRideForBooking) {
+              setShowBookingModal(true);
+            }
           }
         }
       } else {
@@ -2989,41 +3052,39 @@ export default function Home() {
             {/* TAB 1: SIGN IN FORM */}
             {authTab === 'SIGNIN' && (
               <div className="space-y-3">
-                {/* When in Email mode, offer Password vs 6-digit OTP */}
-                {authIdentityType === 'EMAIL' && (
-                  <div className="flex items-center justify-between text-[11px] pb-1 border-b border-slate-100 font-semibold text-slate-600">
-                    <span>Email Sign-In Method:</span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAuthMethod('PASSWORD');
-                          setOtpSent(false);
-                          setAuthError(null);
-                        }}
-                        className={`cursor-pointer ${
-                          authMethod === 'PASSWORD' ? 'text-emerald-800 font-bold underline' : 'hover:text-slate-900'
-                        }`}
-                      >
-                        Password
-                      </button>
-                      <span>•</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAuthMethod('OTP');
-                          setOtpSent(false);
-                          setAuthError(null);
-                        }}
-                        className={`cursor-pointer ${
-                          authMethod === 'OTP' ? 'text-emerald-800 font-bold underline' : 'hover:text-slate-900'
-                        }`}
-                      >
-                        Email OTP Code
-                      </button>
-                    </div>
+                {/* Sign-In Method Selector (Password vs Instant OTP) */}
+                <div className="flex items-center justify-between text-[11px] pb-1 border-b border-slate-100 font-semibold text-slate-600">
+                  <span>{authIdentityType === 'PHONE' ? 'Mobile Sign-In Method:' : 'Email Sign-In Method:'}</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthMethod('PASSWORD');
+                        setOtpSent(false);
+                        setAuthError(null);
+                      }}
+                      className={`cursor-pointer ${
+                        authMethod === 'PASSWORD' ? 'text-emerald-800 font-bold underline' : 'hover:text-slate-900'
+                      }`}
+                    >
+                      Password
+                    </button>
+                    <span>•</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthMethod('OTP');
+                        setOtpSent(false);
+                        setAuthError(null);
+                      }}
+                      className={`cursor-pointer ${
+                        authMethod === 'OTP' ? 'text-emerald-800 font-bold underline' : 'hover:text-slate-900'
+                      }`}
+                    >
+                      {authIdentityType === 'PHONE' ? 'SMS / WhatsApp OTP' : 'Email OTP Code'}
+                    </button>
                   </div>
-                )}
+                </div>
 
                 <form onSubmit={handleSupabaseSignIn} className="space-y-3">
                   {authIdentityType === 'PHONE' ? (
@@ -3058,7 +3119,7 @@ export default function Home() {
                     </div>
                   )}
 
-                  {authIdentityType === 'PHONE' || authMethod === 'PASSWORD' ? (
+                  {authMethod === 'PASSWORD' ? (
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1">Password</label>
                       <input
@@ -3073,7 +3134,9 @@ export default function Home() {
                   ) : (
                     otpSent && (
                       <div>
-                        <label className="block text-xs font-bold text-slate-700 mb-1">Enter 6-Digit Email Code</label>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          {authIdentityType === 'PHONE' ? 'Enter 6-Digit SMS Code' : 'Enter 6-Digit Email Code'}
+                        </label>
                         <input
                           type="text"
                           required
@@ -3083,6 +3146,18 @@ export default function Home() {
                           placeholder="e.g. 481920"
                           className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-black text-center tracking-widest text-emerald-800 focus:outline-none focus:border-emerald-600"
                         />
+                        {authIdentityType === 'PHONE' && (
+                          <div className="mt-1.5 flex justify-end">
+                            <a
+                              href={getWhatsAppUrl(authPhone, `Salam, mera Apni Sawari verification code chahye.`)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[11px] text-emerald-700 hover:text-emerald-800 font-bold hover:underline inline-flex items-center gap-1 cursor-pointer"
+                            >
+                              <span>💬</span> WhatsApp par code mangwayen
+                            </a>
+                          </div>
+                        )}
                       </div>
                     )
                   )}
@@ -3094,12 +3169,14 @@ export default function Home() {
                   >
                     {authLoading
                       ? 'Authenticating...'
-                      : authIdentityType === 'PHONE'
-                      ? 'Sign In with Mobile ➔'
                       : authMethod === 'PASSWORD'
-                      ? 'Sign In with Email ➔'
+                      ? authIdentityType === 'PHONE'
+                        ? 'Sign In with Mobile ➔'
+                        : 'Sign In with Email ➔'
                       : !otpSent
-                      ? 'Send Verification Code ➔'
+                      ? authIdentityType === 'PHONE'
+                        ? 'Send SMS Code ➔'
+                        : 'Send Verification Code ➔'
                       : 'Verify Code & Sign In ➔'}
                   </button>
 
