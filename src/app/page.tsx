@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { normalizePakistaniPhone, getWhatsAppUrl, getCallUrl } from '@/lib/phone';
 import {
   acceptBookingRequest,
   rejectBookingRequest,
@@ -312,9 +313,10 @@ export default function Home() {
   // Filter Chips
   const [activeTagFilter, setActiveTagFilter] = useState<'ALL' | 'KHALI_WAPSI' | 'FAMILY' | 'MAX_2_BACK' | 'LADIES_ONLY'>('ALL');
 
-  // Authentication State (100% Real Supabase - No Demo Accounts)
+  // Authentication State (Dual Phone-First & Email Support)
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authTab, setAuthTab] = useState<'SIGNIN' | 'SIGNUP'>('SIGNIN');
+  const [authIdentityType, setAuthIdentityType] = useState<'PHONE' | 'EMAIL'>('PHONE');
   const [authMethod, setAuthMethod] = useState<'PASSWORD' | 'OTP'>('PASSWORD');
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
@@ -423,12 +425,16 @@ export default function Home() {
     const meta = user.user_metadata || {};
     const role = (meta.role === 'DRIVER' ? 'DRIVER' : 'PASSENGER') as 'PASSENGER' | 'DRIVER';
     const vehicleMeta = meta.vehicle as AppUserProfile['vehicle'] | undefined;
+    const isSyntheticEmail = Boolean(user.email && user.email.includes('@apnisawari.pk'));
+    const displayEmail = isSyntheticEmail ? '' : (user.email || '');
+    const metaPhone = (meta.phone as string) || '';
+    const phoneDisplay = metaPhone || (isSyntheticEmail ? user.email?.replace('phone_', '').replace('@apnisawari.pk', '') : '') || '0300-1234567';
 
     return {
       id: user.id,
-      name: (meta.full_name as string) || user.email?.split('@')[0] || 'Member',
-      email: user.email || '',
-      phone: (meta.phone as string) || '0300-1234567',
+      name: (meta.full_name as string) || (displayEmail ? displayEmail.split('@')[0] : phoneDisplay) || 'Member',
+      email: displayEmail,
+      phone: phoneDisplay,
       role,
       avatarUrl: role === 'DRIVER' ? '👨‍✈️' : '🧑',
       city: (meta.city as string) || 'Karachi',
@@ -1069,27 +1075,34 @@ export default function Home() {
 
   const handleSupabaseSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!authEmail) return;
-
     setAuthLoading(true);
     setAuthError(null);
 
     try {
-      if (authMethod === 'PASSWORD') {
+      if (!supabase) {
+        throw new Error('Supabase client is not initialized.');
+      }
+
+      if (authIdentityType === 'PHONE') {
+        const norm = normalizePakistaniPhone(authPhone);
+        if (!norm.valid) {
+          throw new Error('Please enter a valid Pakistani mobile number (e.g. 0333 1234567).');
+        }
         if (!authPassword) {
           throw new Error('Please enter your password.');
         }
 
-        if (!supabase) {
-          throw new Error('Supabase client is not initialized.');
-        }
-
         const { data, error } = await supabase.auth.signInWithPassword({
-          email: authEmail.trim(),
+          email: norm.internalEmail,
           password: authPassword,
         });
 
-        if (error) throw error;
+        if (error) {
+          if (error.message.toLowerCase().includes('invalid login')) {
+            throw new Error('Invalid mobile number or password. If you don\'t have an account yet, please click "Create Account".');
+          }
+          throw error;
+        }
 
         if (data.user) {
           const profile = mapSupabaseUserToProfile(data.user);
@@ -1099,7 +1112,7 @@ export default function Home() {
           setNotification({
             type: 'success',
             title: 'Welcome Back!',
-            message: `Signed in as ${profile.name} (${profile.email}).`,
+            message: `Signed in as ${profile.name} (${norm.display}).`,
           });
 
           if (selectedRideForBooking) {
@@ -1107,65 +1120,101 @@ export default function Home() {
           }
         }
       } else {
-        // OTP METHOD
-        if (!otpSent) {
-          // Step 1: Send verification code to email
-          const res = await fetch('/api/auth/otp', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'send_email', email: authEmail.trim() }),
-          });
-          const json = await res.json();
-          if (!res.ok || !json.success) {
-            throw new Error(json.error || 'Failed to dispatch verification code.');
-          }
-          setOtpToken(json.token || '');
-          setOtpSent(true);
-          setNotification({
-            type: 'success',
-            title: 'Verification Code Dispatched!',
-            message: `A 6-digit code has been sent to ${authEmail.trim()}. Please check your inbox.`,
-          });
-        } else {
-          // Step 2: Verify code
-          const res = await fetch('/api/auth/otp', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              action: 'verify_email',
-              email: authEmail.trim(),
-              code: otpCode.trim(),
-              token: otpToken,
-            }),
-          });
-          const json = await res.json();
-          if (!res.ok || !json.success) {
-            throw new Error(json.error || 'Invalid or expired code.');
+        // Email Sign In
+        if (!authEmail) {
+          throw new Error('Please enter your email address.');
+        }
+
+        if (authMethod === 'PASSWORD') {
+          if (!authPassword) {
+            throw new Error('Please enter your password.');
           }
 
-          // Verified successfully! Map into a verified profile
-          const profile: AppUserProfile = {
-            id: `usr-${authEmail.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}`,
-            name: authEmail.split('@')[0],
+          const { data, error } = await supabase.auth.signInWithPassword({
             email: authEmail.trim(),
-            phone: '0300-1234567',
-            role: 'PASSENGER',
-            avatarUrl: '🧑',
-            city: 'Karachi',
-            verificationStatus: 'VERIFIED',
-          };
-          setCurrentUser(profile);
-          setShowAuthModal(false);
-          setOtpSent(false);
-          setOtpCode('');
-          setNotification({
-            type: 'success',
-            title: 'Email Verified!',
-            message: `Logged in as ${profile.email}.`,
+            password: authPassword,
           });
 
-          if (selectedRideForBooking) {
-            setShowBookingModal(true);
+          if (error) {
+            if (error.message.toLowerCase().includes('invalid login')) {
+              throw new Error('Invalid email or password. Please verify your credentials or create an account.');
+            }
+            throw error;
+          }
+
+          if (data.user) {
+            const profile = mapSupabaseUserToProfile(data.user);
+            setCurrentUser(profile);
+            setShowAuthModal(false);
+            setAuthPassword('');
+            setNotification({
+              type: 'success',
+              title: 'Welcome Back!',
+              message: `Signed in as ${profile.name} (${profile.email}).`,
+            });
+
+            if (selectedRideForBooking) {
+              setShowBookingModal(true);
+            }
+          }
+        } else {
+          // Email OTP Method
+          if (!otpSent) {
+            const res = await fetch('/api/auth/otp', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'send_email', email: authEmail.trim() }),
+            });
+            const json = await res.json();
+            if (!res.ok || !json.success) {
+              throw new Error(json.error || 'Failed to dispatch verification code.');
+            }
+            setOtpToken(json.token || '');
+            setOtpSent(true);
+            setNotification({
+              type: 'success',
+              title: 'Verification Code Dispatched!',
+              message: `A 6-digit code has been sent to ${authEmail.trim()}. Please check your inbox.`,
+            });
+          } else {
+            const res = await fetch('/api/auth/otp', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                action: 'verify_email',
+                email: authEmail.trim(),
+                code: otpCode.trim(),
+                token: otpToken,
+              }),
+            });
+            const json = await res.json();
+            if (!res.ok || !json.success) {
+              throw new Error(json.error || 'Invalid or expired code.');
+            }
+
+            const profile: AppUserProfile = {
+              id: `usr-${authEmail.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}`,
+              name: authEmail.split('@')[0],
+              email: authEmail.trim(),
+              phone: '0300-1234567',
+              role: 'PASSENGER',
+              avatarUrl: '🧑',
+              city: 'Karachi',
+              verificationStatus: 'VERIFIED',
+            };
+            setCurrentUser(profile);
+            setShowAuthModal(false);
+            setOtpSent(false);
+            setOtpCode('');
+            setNotification({
+              type: 'success',
+              title: 'Email Verified!',
+              message: `Logged in as ${profile.email}.`,
+            });
+
+            if (selectedRideForBooking) {
+              setShowBookingModal(true);
+            }
           }
         }
       }
@@ -1179,13 +1228,38 @@ export default function Home() {
 
   const handleSupabaseSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!authEmail || !authPassword) return;
     setAuthLoading(true);
     setAuthError(null);
 
     try {
-      const fullName = authName.trim() || authEmail.split('@')[0];
-      const phone = authPhone.trim() || '0300-1234567';
+      if (!authPassword) {
+        throw new Error('Please enter a password.');
+      }
+      if (authPassword.length < 6) {
+        throw new Error('Password must be at least 6 characters long.');
+      }
+
+      let phoneToUse = '';
+      let emailToUse = '';
+      let targetAuthIdentifier = '';
+
+      if (authIdentityType === 'PHONE') {
+        const norm = normalizePakistaniPhone(authPhone);
+        if (!norm.valid) {
+          throw new Error('Please enter a valid Pakistani mobile number (e.g. 0333 1234567).');
+        }
+        phoneToUse = norm.formatted;
+        targetAuthIdentifier = norm.internalEmail;
+      } else {
+        if (!authEmail || !authEmail.includes('@')) {
+          throw new Error('Please enter a valid email address.');
+        }
+        emailToUse = authEmail.trim().toLowerCase();
+        targetAuthIdentifier = emailToUse;
+        phoneToUse = authPhone ? normalizePakistaniPhone(authPhone).formatted : '';
+      }
+
+      const fullName = authName.trim() || (authIdentityType === 'PHONE' ? phoneToUse : emailToUse.split('@')[0]);
       const vehiclePayload =
         authRole === 'DRIVER'
           ? {
@@ -1197,17 +1271,18 @@ export default function Home() {
             }
           : undefined;
 
-      // 1. Try server-side instant registration with auto-confirmation first
+      // 1. Try server-side instant registration with auto-confirmation
       let registeredUser: any = null;
       try {
         const regRes = await fetch('/api/auth/register', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            email: authEmail.trim(),
+            authMode: authIdentityType,
+            email: emailToUse,
+            phone: phoneToUse,
             password: authPassword,
             fullName,
-            phone,
             role: authRole,
             city: authCity,
             vehicle: vehiclePayload,
@@ -1228,12 +1303,13 @@ export default function Home() {
       // 2. Direct Supabase client sign up fallback if server registration was not used
       if (!registeredUser && supabase) {
         const { data, error } = await supabase.auth.signUp({
-          email: authEmail.trim(),
+          email: targetAuthIdentifier,
           password: authPassword,
           options: {
             data: {
               full_name: fullName,
-              phone,
+              phone: phoneToUse,
+              auth_mode: authIdentityType,
               role: authRole,
               city: authCity,
               vehicle: vehiclePayload,
@@ -1247,7 +1323,7 @@ export default function Home() {
       // 3. Immediately log in via Supabase password auth
       if (supabase) {
         const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-          email: authEmail.trim(),
+          email: targetAuthIdentifier,
           password: authPassword,
         });
 
@@ -1276,8 +1352,8 @@ export default function Home() {
       const fallbackProfile: AppUserProfile = {
         id: registeredUser?.id || `usr-${Date.now()}`,
         name: fullName,
-        email: authEmail.trim(),
-        phone,
+        email: emailToUse,
+        phone: phoneToUse || '0300-1234567',
         role: authRole,
         city: authCity,
         vehicle: vehiclePayload,
@@ -1300,16 +1376,7 @@ export default function Home() {
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Registration failed.';
-      if (
-        msg.toLowerCase().includes('rate limit') ||
-        msg.toLowerCase().includes('over_email_send_rate_limit')
-      ) {
-        setAuthError(
-          'Supabase email confirmation rate limit reached (max 3 emails/hour on free tier). Please toggle "Confirm email" OFF in Supabase Dashboard -> Auth -> Providers -> Email.'
-        );
-      } else {
-        setAuthError(msg);
-      }
+      setAuthError(msg);
     } finally {
       setAuthLoading(false);
     }
@@ -2851,7 +2918,7 @@ export default function Home() {
               </button>
             </div>
 
-            {/* Auth Tab Selector (Strictly Sign In and Register - NO DEMO TAB) */}
+            {/* Auth Tab Selector (Sign In vs Create Account) */}
             <div className="flex rounded-xl bg-slate-100 p-1 text-xs font-bold text-slate-600">
               <button
                 type="button"
@@ -2881,6 +2948,38 @@ export default function Home() {
               </button>
             </div>
 
+            {/* Identifier Mode Switcher: Mobile Number (Phone-First) vs Email Address */}
+            <div className="flex rounded-xl bg-slate-100/80 p-1 text-xs font-semibold text-slate-500">
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthIdentityType('PHONE');
+                  setAuthError(null);
+                }}
+                className={`flex-1 py-1.5 rounded-lg transition cursor-pointer text-center flex items-center justify-center gap-1.5 ${
+                  authIdentityType === 'PHONE'
+                    ? 'bg-white text-emerald-800 shadow-xs font-black'
+                    : 'hover:text-slate-900'
+                }`}
+              >
+                <span>📱</span> Mobile Number
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthIdentityType('EMAIL');
+                  setAuthError(null);
+                }}
+                className={`flex-1 py-1.5 rounded-lg transition cursor-pointer text-center flex items-center justify-center gap-1.5 ${
+                  authIdentityType === 'EMAIL'
+                    ? 'bg-white text-emerald-800 shadow-xs font-black'
+                    : 'hover:text-slate-900'
+                }`}
+              >
+                <span>✉️</span> Email Address
+              </button>
+            </div>
+
             {authError && (
               <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold">
                 ⚠️ {authError}
@@ -2890,50 +2989,76 @@ export default function Home() {
             {/* TAB 1: SIGN IN FORM */}
             {authTab === 'SIGNIN' && (
               <div className="space-y-3">
-                {/* Method selector: Password vs Instant Email Code */}
-                <div className="flex items-center justify-between text-[11px] pb-1 border-b border-slate-100 font-semibold text-slate-600">
-                  <span>Login Method:</span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAuthMethod('PASSWORD');
-                        setOtpSent(false);
-                        setAuthError(null);
-                      }}
-                      className={`cursor-pointer ${authMethod === 'PASSWORD' ? 'text-emerald-800 font-bold underline' : 'hover:text-slate-900'}`}
-                    >
-                      Password
-                    </button>
-                    <span>•</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAuthMethod('OTP');
-                        setOtpSent(false);
-                        setAuthError(null);
-                      }}
-                      className={`cursor-pointer ${authMethod === 'OTP' ? 'text-emerald-800 font-bold underline' : 'hover:text-slate-900'}`}
-                    >
-                      Email OTP Code
-                    </button>
+                {/* When in Email mode, offer Password vs 6-digit OTP */}
+                {authIdentityType === 'EMAIL' && (
+                  <div className="flex items-center justify-between text-[11px] pb-1 border-b border-slate-100 font-semibold text-slate-600">
+                    <span>Email Sign-In Method:</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAuthMethod('PASSWORD');
+                          setOtpSent(false);
+                          setAuthError(null);
+                        }}
+                        className={`cursor-pointer ${
+                          authMethod === 'PASSWORD' ? 'text-emerald-800 font-bold underline' : 'hover:text-slate-900'
+                        }`}
+                      >
+                        Password
+                      </button>
+                      <span>•</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAuthMethod('OTP');
+                          setOtpSent(false);
+                          setAuthError(null);
+                        }}
+                        className={`cursor-pointer ${
+                          authMethod === 'OTP' ? 'text-emerald-800 font-bold underline' : 'hover:text-slate-900'
+                        }`}
+                      >
+                        Email OTP Code
+                      </button>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 <form onSubmit={handleSupabaseSignIn} className="space-y-3">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Email Address</label>
-                    <input
-                      type="email"
-                      required
-                      value={authEmail}
-                      onChange={(e) => setAuthEmail(e.target.value)}
-                      placeholder="e.g. gotamjee@gmail.com"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold focus:outline-none focus:border-emerald-600"
-                    />
-                  </div>
+                  {authIdentityType === 'PHONE' ? (
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Pakistani Mobile Number</label>
+                      <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl overflow-hidden focus-within:border-emerald-600">
+                        <span className="bg-slate-100 px-3 py-2.5 text-xs font-bold text-slate-700 border-r border-slate-200 flex items-center gap-1 select-none">
+                          🇵🇰 +92
+                        </span>
+                        <input
+                          type="tel"
+                          required
+                          value={authPhone}
+                          onChange={(e) => setAuthPhone(e.target.value)}
+                          placeholder="0333 1234567"
+                          className="w-full bg-transparent px-3 py-2.5 text-xs font-bold focus:outline-none"
+                        />
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-1">Accepts 03xx-xxxxxxx or 3xx-xxxxxxx (No email needed)</p>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Email Address</label>
+                      <input
+                        type="email"
+                        required
+                        value={authEmail}
+                        onChange={(e) => setAuthEmail(e.target.value)}
+                        placeholder="e.g. gotamjee@gmail.com"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold focus:outline-none focus:border-emerald-600"
+                      />
+                    </div>
+                  )}
 
-                  {authMethod === 'PASSWORD' ? (
+                  {authIdentityType === 'PHONE' || authMethod === 'PASSWORD' ? (
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1">Password</label>
                       <input
@@ -2969,8 +3094,10 @@ export default function Home() {
                   >
                     {authLoading
                       ? 'Authenticating...'
+                      : authIdentityType === 'PHONE'
+                      ? 'Sign In with Mobile ➔'
                       : authMethod === 'PASSWORD'
-                      ? 'Sign In ➔'
+                      ? 'Sign In with Email ➔'
                       : !otpSent
                       ? 'Send Verification Code ➔'
                       : 'Verify Code & Sign In ➔'}
@@ -2996,42 +3123,81 @@ export default function Home() {
             {/* TAB 2: SIGN UP / REGISTER FORM */}
             {authTab === 'SIGNUP' && (
               <form onSubmit={handleSupabaseSignUp} className="space-y-3">
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Full Name</label>
-                    <input
-                      type="text"
-                      required
-                      value={authName}
-                      onChange={(e) => setAuthName(e.target.value)}
-                      placeholder="e.g. Ali Ahmed"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-600"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Phone Number</label>
-                    <input
-                      type="tel"
-                      required
-                      value={authPhone}
-                      onChange={(e) => setAuthPhone(e.target.value)}
-                      placeholder="0300-1234567"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-600"
-                    />
-                  </div>
-                </div>
+                {authIdentityType === 'PHONE' ? (
+                  <>
+                    <div className="p-2.5 bg-emerald-50/70 border border-emerald-200 rounded-xl text-emerald-900 text-[11px] font-semibold flex items-center gap-2">
+                      <span>💡</span>
+                      <span>No email required! Register with your phone number and password directly.</span>
+                    </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Email Address</label>
-                  <input
-                    type="email"
-                    required
-                    value={authEmail}
-                    onChange={(e) => setAuthEmail(e.target.value)}
-                    placeholder="name@example.com"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-600"
-                  />
-                </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Full Name</label>
+                      <input
+                        type="text"
+                        required
+                        value={authName}
+                        onChange={(e) => setAuthName(e.target.value)}
+                        placeholder="e.g. Suneel Kumar"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-600"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Mobile Number</label>
+                      <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl overflow-hidden focus-within:border-emerald-600">
+                        <span className="bg-slate-100 px-3 py-2 text-xs font-bold text-slate-700 border-r border-slate-200 flex items-center gap-1 select-none">
+                          🇵🇰 +92
+                        </span>
+                        <input
+                          type="tel"
+                          required
+                          value={authPhone}
+                          onChange={(e) => setAuthPhone(e.target.value)}
+                          placeholder="0333 1234567"
+                          className="w-full bg-transparent px-3 py-2 text-xs font-bold focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">Full Name</label>
+                        <input
+                          type="text"
+                          required
+                          value={authName}
+                          onChange={(e) => setAuthName(e.target.value)}
+                          placeholder="e.g. Ali Ahmed"
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-600"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">Phone Number (Optional)</label>
+                        <input
+                          type="tel"
+                          value={authPhone}
+                          onChange={(e) => setAuthPhone(e.target.value)}
+                          placeholder="0300-1234567"
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-600"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Email Address</label>
+                      <input
+                        type="email"
+                        required
+                        value={authEmail}
+                        onChange={(e) => setAuthEmail(e.target.value)}
+                        placeholder="name@example.com"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-600"
+                      />
+                    </div>
+                  </>
+                )}
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">Password</label>
@@ -3043,6 +3209,21 @@ export default function Home() {
                     placeholder="Create a strong password (min 6 chars)"
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-600"
                   />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">City</label>
+                  <select
+                    value={authCity}
+                    onChange={(e) => setAuthCity(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-600"
+                  >
+                    {NATIONWIDE_CITIES.map((c) => (
+                      <option key={c.id} value={c.name}>
+                        {c.name} ({c.province})
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div>
@@ -3104,7 +3285,11 @@ export default function Home() {
                   disabled={authLoading}
                   className="w-full bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-black text-xs py-3 rounded-full transition shadow-xs cursor-pointer mt-2"
                 >
-                  {authLoading ? 'Registering with Supabase...' : 'Create Account ➔'}
+                  {authLoading
+                    ? 'Creating Account...'
+                    : authIdentityType === 'PHONE'
+                    ? 'Create Account with Mobile ➔'
+                    : 'Create Account with Email ➔'}
                 </button>
 
                 <p className="text-center text-[11px] text-slate-500 pt-1">

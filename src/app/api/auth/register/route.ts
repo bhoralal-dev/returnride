@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { normalizePakistaniPhone } from '@/lib/phone';
 
 const SUPABASE_URL =
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://yefaqlrczrbdumjuramb.supabase.co';
@@ -12,15 +13,11 @@ const SUPABASE_ANON_KEY =
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { email, password, fullName, phone, role, city, vehicle } = body;
+    const { authMode, email, phone, password, fullName, role, city, vehicle } = body;
 
-    if (!email || !password) {
-      return NextResponse.json(
-        { error: 'Email and password are required.' },
-        { status: 400 }
-      );
+    if (!password) {
+      return NextResponse.json({ error: 'Password is required.' }, { status: 400 });
     }
-
     if (password.length < 6) {
       return NextResponse.json(
         { error: 'Password must be at least 6 characters long.' },
@@ -28,23 +25,45 @@ export async function POST(request: Request) {
       );
     }
 
-    const cleanEmail = email.trim().toLowerCase();
-    const cleanName = (fullName || cleanEmail.split('@')[0]).trim();
-    const cleanPhone = (phone || '').trim();
+    let targetEmail = '';
+    let userPhone = '';
+    let isPhoneAuth = false;
 
-    // 1. Prefer Admin API to instantly create and confirm account without email rate limits
+    if (authMode === 'PHONE' || (!email && phone)) {
+      isPhoneAuth = true;
+      const normalized = normalizePakistaniPhone(phone || '');
+      if (!normalized.valid) {
+        return NextResponse.json(
+          { error: 'Please enter a valid Pakistani mobile number (e.g. 0333-1234567).' },
+          { status: 400 }
+        );
+      }
+      targetEmail = normalized.internalEmail;
+      userPhone = normalized.formatted;
+    } else {
+      if (!email || !email.includes('@')) {
+        return NextResponse.json({ error: 'Please enter a valid email address.' }, { status: 400 });
+      }
+      targetEmail = email.trim().toLowerCase();
+      userPhone = phone ? normalizePakistaniPhone(phone).formatted : '';
+    }
+
+    const cleanName = (fullName || (isPhoneAuth ? userPhone : targetEmail.split('@')[0])).trim();
+
+    // 1. Prefer Admin API if SUPABASE_SECRET_KEY is present
     if (SUPABASE_SECRET_KEY) {
       const adminClient = createClient(SUPABASE_URL, SUPABASE_SECRET_KEY, {
         auth: { autoRefreshToken: false, persistSession: false },
       });
 
       const { data, error } = await adminClient.auth.admin.createUser({
-        email: cleanEmail,
+        email: targetEmail,
         password,
         email_confirm: true,
         user_metadata: {
           full_name: cleanName,
-          phone: cleanPhone,
+          phone: userPhone,
+          auth_mode: isPhoneAuth ? 'PHONE' : 'EMAIL',
           role: role === 'DRIVER' ? 'DRIVER' : 'PASSENGER',
           city: city || 'Karachi',
           vehicle: role === 'DRIVER' ? vehicle : undefined,
@@ -58,7 +77,11 @@ export async function POST(request: Request) {
           error.message.toLowerCase().includes('exists')
         ) {
           return NextResponse.json(
-            { error: 'An account with this email already exists. Please Sign In.' },
+            {
+              error: isPhoneAuth
+                ? 'An account with this phone number already exists. Please Sign In.'
+                : 'An account with this email already exists. Please Sign In.',
+            },
             { status: 409 }
           );
         }
@@ -67,11 +90,12 @@ export async function POST(request: Request) {
 
       return NextResponse.json({
         success: true,
+        authIdentifier: targetEmail,
         user: {
           id: data.user.id,
-          email: data.user.email,
+          email: isPhoneAuth ? '' : data.user.email,
           fullName: cleanName,
-          phone: cleanPhone,
+          phone: userPhone,
           role: role === 'DRIVER' ? 'DRIVER' : 'PASSENGER',
           city: city || 'Karachi',
           vehicle: role === 'DRIVER' ? vehicle : undefined,
@@ -79,15 +103,16 @@ export async function POST(request: Request) {
       });
     }
 
-    // 2. Direct client signUp fallback
+    // 2. Client signUp fallback
     const publicClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     const { data, error } = await publicClient.auth.signUp({
-      email: cleanEmail,
+      email: targetEmail,
       password,
       options: {
         data: {
           full_name: cleanName,
-          phone: cleanPhone,
+          phone: userPhone,
+          auth_mode: isPhoneAuth ? 'PHONE' : 'EMAIL',
           role: role === 'DRIVER' ? 'DRIVER' : 'PASSENGER',
           city: city || 'Karachi',
           vehicle: role === 'DRIVER' ? vehicle : undefined,
@@ -97,15 +122,16 @@ export async function POST(request: Request) {
 
     if (error) {
       if (
-        error.message.toLowerCase().includes('rate limit') ||
-        error.message.toLowerCase().includes('over_email_send_rate_limit')
+        error.message.toLowerCase().includes('already') ||
+        error.message.toLowerCase().includes('registered')
       ) {
         return NextResponse.json(
           {
-            error:
-              'Supabase email confirmation rate limit reached (max 3 emails/hour on free tier). To fix: In your Supabase Dashboard, go to Authentication > Providers > Email and toggle "Confirm email" OFF.',
+            error: isPhoneAuth
+              ? 'An account with this phone number already exists. Please Sign In.'
+              : 'An account with this email already exists. Please Sign In.',
           },
-          { status: 429 }
+          { status: 409 }
         );
       }
       return NextResponse.json({ error: error.message }, { status: 400 });
@@ -113,6 +139,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
+      authIdentifier: targetEmail,
       user: data.user,
     });
   } catch (err: unknown) {
