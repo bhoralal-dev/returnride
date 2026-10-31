@@ -297,24 +297,35 @@ export async function POST(request: Request) {
       let sentViaGateway = false;
 
       // 1. TextBee Free Open-Source Android SMS Gateway (100% Free via Android SIM package)
-      if (textBeeApiKey && textBeeDeviceId) {
+      if (textBeeApiKey) {
         try {
-          const tbRes = await fetch(
-            `https://api.textbee.dev/api/v1/gateway/devices/${textBeeDeviceId}/send-sms`,
-            {
-              method: 'POST',
-              headers: {
-                'x-api-key': textBeeApiKey,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                recipients: [normalized],
-                message: `Apni Sawari (اپنی سواری) Verification Code: ${otpCode}\nValid for 10 mins.`,
-              }),
-            }
-          );
+          const endpoint = textBeeDeviceId
+            ? `https://api.textbee.dev/api/v1/gateway/devices/${textBeeDeviceId}/send-sms`
+            : 'https://api.textbee.dev/api/v1/gateway/send-sms';
+
+          const payload: Record<string, unknown> = {
+            recipients: [normalized],
+            message: `Apni Sawari (اپنی سواری) Verification Code: ${otpCode}\nValid for 10 mins.`,
+          };
+          if (textBeeDeviceId) {
+            payload.deviceId = textBeeDeviceId;
+          }
+
+          const tbRes = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'x-api-key': textBeeApiKey,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+          });
+
           if (tbRes.ok) {
             sentViaGateway = true;
+            console.log(`[Apni Sawari SMS] Successfully queued SMS via TextBee to ${normalized}`);
+          } else {
+            const errText = await tbRes.text();
+            console.error('[Apni Sawari SMS] TextBee responded with status', tbRes.status, errText);
           }
         } catch (tbErr) {
           console.error('[Apni Sawari SMS] TextBee Gateway error:', tbErr);
