@@ -1323,6 +1323,87 @@ export default function Home() {
       }
 
       const fullName = authName.trim() || (authIdentityType === 'PHONE' ? phoneToUse : emailToUse.split('@')[0]);
+
+      // STEP 1: Dispatches OTP via real SIM SMS or Email if not yet sent
+      if (!otpSent) {
+        if (authIdentityType === 'PHONE') {
+          const res = await fetch('/api/auth/otp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'send_sms', phone: phoneToUse }),
+          });
+          const json = await res.json();
+          if (!res.ok || !json.success) {
+            throw new Error(json.error || 'Failed to dispatch SMS verification code.');
+          }
+          setOtpToken(json.token || '');
+          setOtpSent(true);
+          setOtpCode('');
+          setNotification({
+            type: 'success',
+            title: 'SMS Code Dispatched!',
+            message: `A 6-digit verification code has been dispatched via SMS to ${authPhone}.`,
+          });
+        } else {
+          const res = await fetch('/api/auth/otp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'send_email', email: emailToUse }),
+          });
+          const json = await res.json();
+          if (!res.ok || !json.success) {
+            throw new Error(json.error || 'Failed to dispatch verification email.');
+          }
+          setOtpToken(json.token || '');
+          setOtpSent(true);
+          setOtpCode('');
+          setNotification({
+            type: 'success',
+            title: 'Verification Code Dispatched!',
+            message: `A 6-digit verification code has been sent to ${emailToUse}. Please check your inbox.`,
+          });
+        }
+        return;
+      }
+
+      // STEP 2: Verify user entered OTP code
+      if (!otpCode || otpCode.trim().length !== 6) {
+        throw new Error('Please enter the 6-digit verification code sent to your ' + (authIdentityType === 'PHONE' ? 'mobile' : 'email') + '.');
+      }
+
+      if (authIdentityType === 'PHONE') {
+        const verifyRes = await fetch('/api/auth/otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'verify_sms',
+            phone: phoneToUse,
+            code: otpCode.trim(),
+            token: otpToken,
+          }),
+        });
+        const verifyJson = await verifyRes.json();
+        if (!verifyRes.ok || !verifyJson.success) {
+          throw new Error(verifyJson.error || 'Invalid or expired SMS verification code.');
+        }
+      } else {
+        const verifyRes = await fetch('/api/auth/otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'verify_email',
+            email: emailToUse,
+            code: otpCode.trim(),
+            token: otpToken,
+          }),
+        });
+        const verifyJson = await verifyRes.json();
+        if (!verifyRes.ok || !verifyJson.success) {
+          throw new Error(verifyJson.error || 'Invalid or expired email verification code.');
+        }
+      }
+
+      // STEP 3: OTP verified! Create user in database with auto-confirmation
       const vehiclePayload =
         authRole === 'DRIVER'
           ? {
@@ -1394,11 +1475,13 @@ export default function Home() {
           const profile = mapSupabaseUserToProfile(signInData.user);
           setCurrentUser(profile);
           setShowAuthModal(false);
+          setOtpSent(false);
+          setOtpCode('');
           setAuthPassword('');
           setNotification({
             type: 'success',
             title: 'Account Created Successfully!',
-            message: `Welcome to Apni Sawari, ${profile.name}! Your account is now active.`,
+            message: `Welcome to Apni Sawari, ${profile.name}! Your ${authIdentityType === 'PHONE' ? 'mobile number' : 'email'} is verified.`,
           });
 
           if (profile.role === 'DRIVER') {
@@ -1424,11 +1507,13 @@ export default function Home() {
       };
       setCurrentUser(fallbackProfile);
       setShowAuthModal(false);
+      setOtpSent(false);
+      setOtpCode('');
       setAuthPassword('');
       setNotification({
         type: 'success',
         title: 'Account Created Successfully!',
-        message: `Welcome to Apni Sawari, ${fullName}! Your account is now active.`,
+        message: `Welcome to Apni Sawari, ${fallbackProfile.name}! Your account is now active.`,
       });
 
       if (authRole === 'DRIVER') {
@@ -3200,174 +3285,285 @@ export default function Home() {
             {/* TAB 2: SIGN UP / REGISTER FORM */}
             {authTab === 'SIGNUP' && (
               <form onSubmit={handleSupabaseSignUp} className="space-y-3">
-                {authIdentityType === 'PHONE' ? (
-                  <>
-                    <div className="p-2.5 bg-emerald-50/70 border border-emerald-200 rounded-xl text-emerald-900 text-[11px] font-semibold flex items-center gap-2">
-                      <span>💡</span>
-                      <span>No email required! Register with your phone number and password directly.</span>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">Full Name</label>
-                      <input
-                        type="text"
-                        required
-                        value={authName}
-                        onChange={(e) => setAuthName(e.target.value)}
-                        placeholder="e.g. Suneel Kumar"
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-600"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">Mobile Number</label>
-                      <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl overflow-hidden focus-within:border-emerald-600">
-                        <span className="bg-slate-100 px-3 py-2 text-xs font-bold text-slate-700 border-r border-slate-200 flex items-center gap-1 select-none">
-                          🇵🇰 +92
+                {otpSent ? (
+                  /* OTP VERIFICATION STEP (Triggered after user fills signup form) */
+                  <div className="space-y-3.5">
+                    <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[11px] font-black text-emerald-900 tracking-wide flex items-center gap-1.5">
+                          <span>{authIdentityType === 'PHONE' ? '📱 SMS OTP Code' : '✉️ Email Verification Code'}</span>
                         </span>
-                        <input
-                          type="tel"
-                          required
-                          value={authPhone}
-                          onChange={(e) => setAuthPhone(e.target.value)}
-                          placeholder="0333 1234567"
-                          className="w-full bg-transparent px-3 py-2 text-xs font-bold focus:outline-none"
-                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOtpSent(false);
+                            setOtpCode('');
+                            setAuthError(null);
+                          }}
+                          className="text-[11px] text-emerald-800 hover:text-emerald-950 font-bold underline cursor-pointer"
+                        >
+                          ✏️ Edit Details
+                        </button>
                       </div>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="block text-xs font-bold text-slate-700 mb-1">Full Name</label>
-                        <input
-                          type="text"
-                          required
-                          value={authName}
-                          onChange={(e) => setAuthName(e.target.value)}
-                          placeholder="e.g. Ali Ahmed"
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-600"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-bold text-slate-700 mb-1">Phone Number (Optional)</label>
-                        <input
-                          type="tel"
-                          value={authPhone}
-                          onChange={(e) => setAuthPhone(e.target.value)}
-                          placeholder="0300-1234567"
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-600"
-                        />
-                      </div>
+                      <p className="text-xs text-emerald-950 font-semibold leading-relaxed">
+                        A 6-digit code was sent to{' '}
+                        <span className="font-black text-emerald-900 bg-white px-2 py-0.5 rounded-md border border-emerald-200">
+                          {authIdentityType === 'PHONE' ? authPhone : authEmail}
+                        </span>
+                      </p>
                     </div>
 
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">Email Address</label>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                        Enter 6-Digit Verification Code
+                      </label>
                       <input
-                        type="email"
+                        type="text"
                         required
-                        value={authEmail}
-                        onChange={(e) => setAuthEmail(e.target.value)}
-                        placeholder="name@example.com"
+                        maxLength={6}
+                        value={otpCode}
+                        onChange={(e) => setOtpCode(e.target.value)}
+                        placeholder="• • • • • •"
+                        autoFocus
+                        className="w-full bg-slate-50 border-2 border-emerald-600 rounded-xl px-4 py-3 text-xl font-black text-center tracking-[0.35em] text-emerald-900 focus:outline-none focus:bg-white focus:ring-2 focus:ring-emerald-500/20 shadow-xs"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] pt-0.5">
+                      {authIdentityType === 'PHONE' ? (
+                        <a
+                          href={getWhatsAppUrl(authPhone, `Salam, mera Apni Sawari signup code chahye.`)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-emerald-700 hover:text-emerald-800 font-bold hover:underline inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <span>💬</span> WhatsApp fallback
+                        </a>
+                      ) : <span />}
+
+                      <button
+                        type="button"
+                        disabled={authLoading}
+                        onClick={async () => {
+                          setAuthLoading(true);
+                          setAuthError(null);
+                          try {
+                            if (authIdentityType === 'PHONE') {
+                              const norm = normalizePakistaniPhone(authPhone);
+                              const res = await fetch('/api/auth/otp', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ action: 'send_sms', phone: norm.formatted }),
+                              });
+                              const json = await res.json();
+                              if (json.token) setOtpToken(json.token);
+                            } else {
+                              const res = await fetch('/api/auth/otp', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ action: 'send_email', email: authEmail.trim() }),
+                              });
+                              const json = await res.json();
+                              if (json.token) setOtpToken(json.token);
+                            }
+                            setNotification({
+                              type: 'info',
+                              title: 'Code Resent',
+                              message: 'A fresh verification code has been dispatched.',
+                            });
+                          } catch (err: unknown) {
+                            setAuthError(err instanceof Error ? err.message : 'Failed to resend code.');
+                          } finally {
+                            setAuthLoading(false);
+                          }
+                        }}
+                        className="text-slate-600 hover:text-slate-900 font-bold underline cursor-pointer"
+                      >
+                        Resend Code 🔄
+                      </button>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={authLoading}
+                      className="w-full bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-black text-xs py-3 rounded-full transition shadow-xs cursor-pointer mt-2"
+                    >
+                      {authLoading ? 'Verifying Code & Creating Account...' : '✅ Verify Code & Complete Registration ➔'}
+                    </button>
+                  </div>
+                ) : (
+                  /* STEP 1: INITIAL REGISTRATION DETAILS */
+                  <>
+                    {authIdentityType === 'PHONE' ? (
+                      <>
+                        <div className="p-2.5 bg-emerald-50/70 border border-emerald-200 rounded-xl text-emerald-900 text-[11px] font-semibold flex items-center gap-2">
+                          <span>💡</span>
+                          <span>No email required! An SMS verification code will be sent to your mobile.</span>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1">Full Name</label>
+                          <input
+                            type="text"
+                            required
+                            value={authName}
+                            onChange={(e) => setAuthName(e.target.value)}
+                            placeholder="e.g. Suneel Kumar"
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-600"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1">Mobile Number</label>
+                          <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl overflow-hidden focus-within:border-emerald-600">
+                            <span className="bg-slate-100 px-3 py-2 text-xs font-bold text-slate-700 border-r border-slate-200 flex items-center gap-1 select-none">
+                              🇵🇰 +92
+                            </span>
+                            <input
+                              type="tel"
+                              required
+                              value={authPhone}
+                              onChange={(e) => setAuthPhone(e.target.value)}
+                              placeholder="0333 1234567"
+                              className="w-full bg-transparent px-3 py-2 text-xs font-bold focus:outline-none"
+                            />
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-xs font-bold text-slate-700 mb-1">Full Name</label>
+                            <input
+                              type="text"
+                              required
+                              value={authName}
+                              onChange={(e) => setAuthName(e.target.value)}
+                              placeholder="e.g. Ali Ahmed"
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-600"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-bold text-slate-700 mb-1">Phone Number (Optional)</label>
+                            <input
+                              type="tel"
+                              value={authPhone}
+                              onChange={(e) => setAuthPhone(e.target.value)}
+                              placeholder="0300-1234567"
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-600"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1">Email Address</label>
+                          <input
+                            type="email"
+                            required
+                            value={authEmail}
+                            onChange={(e) => setAuthEmail(e.target.value)}
+                            placeholder="name@example.com"
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-600"
+                          />
+                        </div>
+                      </>
+                    )}
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Password</label>
+                      <input
+                        type="password"
+                        required
+                        value={authPassword}
+                        onChange={(e) => setAuthPassword(e.target.value)}
+                        placeholder="Create a strong password (min 6 chars)"
                         className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-600"
                       />
                     </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">City</label>
+                      <select
+                        value={authCity}
+                        onChange={(e) => setAuthCity(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-600"
+                      >
+                        {NATIONWIDE_CITIES.map((c) => (
+                          <option key={c.id} value={c.name}>
+                            {c.name} ({c.province})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">How will you use Apni Sawari?</label>
+                      <div className="grid grid-cols-2 gap-2 text-xs font-bold">
+                        <button
+                          type="button"
+                          onClick={() => setAuthRole('PASSENGER')}
+                          className={`p-2.5 rounded-xl border text-center transition cursor-pointer ${
+                            authRole === 'PASSENGER'
+                              ? 'bg-emerald-50 border-emerald-600 text-emerald-950 font-black'
+                              : 'bg-white border-slate-200 text-slate-700'
+                          }`}
+                        >
+                          <span className="block text-base">🧑</span>
+                          <span>I am a Passenger</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAuthRole('DRIVER')}
+                          className={`p-2.5 rounded-xl border text-center transition cursor-pointer ${
+                            authRole === 'DRIVER'
+                              ? 'bg-emerald-50 border-emerald-600 text-emerald-950 font-black'
+                              : 'bg-white border-slate-200 text-slate-700'
+                          }`}
+                        >
+                          <span className="block text-base">🚗</span>
+                          <span>I am a Driver (Have Car)</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {authRole === 'DRIVER' && (
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                        <span className="text-[11px] font-bold text-slate-700 block">Vehicle Information</span>
+                        <div className="grid grid-cols-2 gap-2">
+                          <input
+                            type="text"
+                            required
+                            value={authCarModel}
+                            onChange={(e) => setAuthCarModel(e.target.value)}
+                            placeholder="Car Model (e.g. Corolla)"
+                            className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold"
+                          />
+                          <input
+                            type="text"
+                            required
+                            value={authCarPlate}
+                            onChange={(e) => setAuthCarPlate(e.target.value)}
+                            placeholder="Plate (e.g. LEB-4592)"
+                            className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    <button
+                      type="submit"
+                      disabled={authLoading}
+                      className="w-full bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-black text-xs py-3 rounded-full transition shadow-xs cursor-pointer mt-2"
+                    >
+                      {authLoading
+                        ? 'Sending Verification Code...'
+                        : authIdentityType === 'PHONE'
+                        ? '📱 Send SMS Verification Code ➔'
+                        : '✉️ Send Email Verification Code ➔'}
+                    </button>
                   </>
                 )}
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Password</label>
-                  <input
-                    type="password"
-                    required
-                    value={authPassword}
-                    onChange={(e) => setAuthPassword(e.target.value)}
-                    placeholder="Create a strong password (min 6 chars)"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-600"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">City</label>
-                  <select
-                    value={authCity}
-                    onChange={(e) => setAuthCity(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-600"
-                  >
-                    {NATIONWIDE_CITIES.map((c) => (
-                      <option key={c.id} value={c.name}>
-                        {c.name} ({c.province})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">How will you use Apni Sawari?</label>
-                  <div className="grid grid-cols-2 gap-2 text-xs font-bold">
-                    <button
-                      type="button"
-                      onClick={() => setAuthRole('PASSENGER')}
-                      className={`p-2.5 rounded-xl border text-center transition cursor-pointer ${
-                        authRole === 'PASSENGER'
-                          ? 'bg-emerald-50 border-emerald-600 text-emerald-950 font-black'
-                          : 'bg-white border-slate-200 text-slate-700'
-                      }`}
-                    >
-                      <span className="block text-base">🧑</span>
-                      <span>I am a Passenger</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setAuthRole('DRIVER')}
-                      className={`p-2.5 rounded-xl border text-center transition cursor-pointer ${
-                        authRole === 'DRIVER'
-                          ? 'bg-emerald-50 border-emerald-600 text-emerald-950 font-black'
-                          : 'bg-white border-slate-200 text-slate-700'
-                      }`}
-                    >
-                      <span className="block text-base">🚗</span>
-                      <span>I am a Driver (Have Car)</span>
-                    </button>
-                  </div>
-                </div>
-
-                {authRole === 'DRIVER' && (
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-                    <span className="text-[11px] font-bold text-slate-700 block">Vehicle Information</span>
-                    <div className="grid grid-cols-2 gap-2">
-                      <input
-                        type="text"
-                        required
-                        value={authCarModel}
-                        onChange={(e) => setAuthCarModel(e.target.value)}
-                        placeholder="Car Model (e.g. Corolla)"
-                        className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold"
-                      />
-                      <input
-                        type="text"
-                        required
-                        value={authCarPlate}
-                        onChange={(e) => setAuthCarPlate(e.target.value)}
-                        placeholder="Plate (e.g. LEB-4592)"
-                        className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={authLoading}
-                  className="w-full bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-black text-xs py-3 rounded-full transition shadow-xs cursor-pointer mt-2"
-                >
-                  {authLoading
-                    ? 'Creating Account...'
-                    : authIdentityType === 'PHONE'
-                    ? 'Create Account with Mobile ➔'
-                    : 'Create Account with Email ➔'}
-                </button>
 
                 <p className="text-center text-[11px] text-slate-500 pt-1">
                   Already have an account?{' '}
@@ -3376,6 +3572,7 @@ export default function Home() {
                     onClick={() => {
                       setAuthTab('SIGNIN');
                       setAuthError(null);
+                      setOtpSent(false);
                     }}
                     className="text-emerald-700 font-bold hover:underline cursor-pointer"
                   >
