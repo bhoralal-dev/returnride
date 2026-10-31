@@ -96,6 +96,18 @@ export async function POST(request: Request) {
     });
 
     if (error) {
+      if (
+        error.message.toLowerCase().includes('rate limit') ||
+        error.message.toLowerCase().includes('over_email_send_rate_limit')
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              'Supabase email confirmation rate limit reached (max 3 emails/hour on free tier). To fix: In your Supabase Dashboard, go to Authentication > Providers > Email and toggle "Confirm email" OFF.',
+          },
+          { status: 429 }
+        );
+      }
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 

@@ -1300,7 +1300,16 @@ export default function Home() {
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Registration failed.';
-      setAuthError(msg);
+      if (
+        msg.toLowerCase().includes('rate limit') ||
+        msg.toLowerCase().includes('over_email_send_rate_limit')
+      ) {
+        setAuthError(
+          'Supabase email confirmation rate limit reached (max 3 emails/hour on free tier). Please toggle "Confirm email" OFF in Supabase Dashboard -> Auth -> Providers -> Email.'
+        );
+      } else {
+        setAuthError(msg);
+      }
     } finally {
       setAuthLoading(false);
     }
