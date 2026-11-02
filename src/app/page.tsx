@@ -782,6 +782,18 @@ export default function Home() {
     });
   }, [bookings, currentUser]);
 
+  const myConfirmedSawariRequests = useMemo(() => {
+    if (!currentUser) return [];
+    return passengerRequests.filter((r) => {
+      const isOwner = (
+        r.passengerId === currentUser.id ||
+        r.passengerName.toLowerCase() === currentUser.name.toLowerCase() ||
+        (r.passengerPhone && currentUser.phone && r.passengerPhone === currentUser.phone)
+      );
+      return isOwner && r.status === 'ACCEPTED';
+    });
+  }, [passengerRequests, currentUser]);
+
   // Handle Search Submission
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -2054,9 +2066,9 @@ export default function Home() {
                 }`}
               >
                 🎟️ My Bookings
-                {myPassengerBookings.length > 0 && (
+                {(myPassengerBookings.length + myConfirmedSawariRequests.length) > 0 && (
                   <span className="ml-1.5 px-1.5 py-0.2 bg-emerald-700 text-white text-[10px] font-black rounded-full">
-                    {myPassengerBookings.length}
+                    {myPassengerBookings.length + myConfirmedSawariRequests.length}
                   </span>
                 )}
               </button>
@@ -2642,12 +2654,20 @@ export default function Home() {
                   {passengerRequests.map((req) => {
                     const oName = NATIONWIDE_CITIES.find((c) => c.id === req.originLocationId)?.name || 'Origin';
                     const dName = NATIONWIDE_CITIES.find((c) => c.id === req.destinationLocationId)?.name || 'Destination';
-                    const isOwner = currentUser?.id === req.passengerId;
+                    const isOwner = Boolean(
+                      currentUser && (
+                        currentUser.id === req.passengerId ||
+                        req.passengerName.toLowerCase() === currentUser.name.toLowerCase() ||
+                        (req.passengerPhone && currentUser.phone && req.passengerPhone === currentUser.phone)
+                      )
+                    );
 
                     return (
                       <div
                         key={req.id}
-                        className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 space-y-3 shadow-2xs"
+                        className={`bg-white rounded-2xl border p-4 sm:p-5 space-y-3 shadow-2xs transition ${
+                          req.status === 'ACCEPTED' ? 'border-emerald-300 ring-2 ring-emerald-50' : 'border-slate-200'
+                        }`}
                       >
                         <div className="flex items-start justify-between">
                           <div className="flex items-center gap-2.5">
@@ -2659,7 +2679,7 @@ export default function Home() {
                                 {oName} ➔ {dName}
                               </span>
                               <span className="text-[10px] sm:text-[11px] text-slate-500 font-medium">
-                                Requested by {req.passengerName}
+                                Requested by <span className="font-bold text-slate-700">{req.passengerName}</span>
                               </span>
                             </div>
                           </div>
@@ -2717,7 +2737,9 @@ export default function Home() {
                           {isOwner ? (
                             <div className="flex items-center gap-2">
                               <span className="text-xs text-slate-500 font-medium">
-                                {req.offers.length === 0
+                                {req.status === 'ACCEPTED'
+                                  ? '🎉 Driver Deal Closed'
+                                  : req.offers.length === 0
                                   ? '⏳ Awaiting Driver Offers'
                                   : `💬 ${req.offers.length} Offer(s)`}
                               </span>
@@ -2738,49 +2760,164 @@ export default function Home() {
                           )}
                         </div>
 
-                        {/* Received Offers Section for Passenger Owner */}
-                        {isOwner && req.offers.length > 0 && (
+                        {/* Confirmed Trip Voucher with Assigned Driver (When Deal is Confirmed) */}
+                        {isOwner && req.status === 'ACCEPTED' && (() => {
+                          const acceptedOffer = req.offers.find((o) => o.id === req.acceptedOfferId) || req.offers[0];
+                          if (!acceptedOffer) return null;
+                          const driverPhone = acceptedOffer.driverPhone || '0300-1234567';
+                          return (
+                            <div className="pt-3 border-t border-emerald-200 space-y-3 bg-emerald-50/90 p-3.5 sm:p-4 rounded-xl border-2 border-emerald-300">
+                              <div className="flex items-center justify-between border-b border-emerald-200/80 pb-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-lg">🎫</span>
+                                  <div>
+                                    <h4 className="text-xs sm:text-sm font-black text-emerald-950">
+                                      Deal Confirmed • Driver Assigned
+                                    </h4>
+                                    <span className="text-[10px] text-emerald-700 font-bold block">
+                                      Your driver will pick you up on {req.travelDate} ({req.desiredTime})
+                                    </span>
+                                  </div>
+                                </div>
+                                <span className="bg-emerald-700 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full">
+                                  CONFIRMED
+                                </span>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 bg-white p-3 rounded-xl border border-emerald-200 text-xs">
+                                <div>
+                                  <span className="text-[9px] uppercase font-bold text-slate-400 block">Driver Details</span>
+                                  <span className="font-black text-slate-900 text-xs sm:text-sm flex items-center gap-1">
+                                    <span>👤</span>
+                                    <span>{acceptedOffer.driverName}</span>
+                                    <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1 rounded font-bold">★ {acceptedOffer.driverRating || 4.9}</span>
+                                  </span>
+                                  <span className="text-[11px] text-slate-600 block mt-0.5 font-mono">
+                                    📞 {driverPhone}
+                                  </span>
+                                </div>
+
+                                <div>
+                                  <span className="text-[9px] uppercase font-bold text-slate-400 block">Vehicle Information</span>
+                                  <span className="font-bold text-slate-900 block">
+                                    🚘 {acceptedOffer.vehicleMakeModel}
+                                  </span>
+                                  <span className="bg-slate-100 border border-slate-300 font-black px-1.5 py-0.2 rounded font-mono text-slate-800 text-[11px] inline-block mt-0.5">
+                                    {acceptedOffer.vehiclePlate || 'Verified Vehicle'}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center justify-between bg-emerald-100/70 p-2.5 rounded-xl border border-emerald-200/80 text-xs">
+                                <span className="text-emerald-900 font-bold">Agreed Fare (Direct Cash):</span>
+                                <span className="text-sm font-black text-emerald-950">
+                                  Rs. {acceptedOffer.offeredPrice.toLocaleString()}
+                                </span>
+                              </div>
+
+                              {/* Action Buttons for Passenger to reach Driver */}
+                              <div className="flex flex-col sm:flex-row items-center gap-2 pt-1">
+                                <a
+                                  href={getWhatsAppUrl(
+                                    driverPhone,
+                                    `Assalam-o-Alaikum ${acceptedOffer.driverName} bhai, I am ${currentUser?.name || req.passengerName}. I confirmed your offer of Rs. ${acceptedOffer.offeredPrice.toLocaleString()} for ${oName} to ${dName} on ${req.travelDate} (${req.desiredTime}). Please let me know your pickup plan and arrival time!`
+                                  )}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="w-full sm:flex-1 bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 shadow-2xs"
+                                >
+                                  <span>💬</span>
+                                  <span>WhatsApp Driver</span>
+                                </a>
+
+                                <a
+                                  href={getCallUrl(driverPhone)}
+                                  className="w-full sm:flex-1 bg-slate-900 hover:bg-black text-white font-black text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 shadow-2xs"
+                                >
+                                  <span>📞</span>
+                                  <span>Call Driver</span>
+                                </a>
+
+                                <a
+                                  href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
+                                    `Assalam-o-Alaikum! I am traveling via Apni Sawari.\nRoute: ${oName} to ${dName}\nDriver: ${acceptedOffer.driverName} (${driverPhone})\nCar: ${acceptedOffer.vehicleMakeModel} (${acceptedOffer.vehiclePlate})\nDeparture: ${req.travelDate} (${req.desiredTime})\nFare: Rs. ${acceptedOffer.offeredPrice.toLocaleString()}\nTrack my journey safely!`
+                                  )}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="w-full sm:w-auto bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1 shadow-2xs"
+                                  title="Share complete driver & car details with family for safety"
+                                >
+                                  <span>🛡️</span>
+                                  <span>Share with Family</span>
+                                </a>
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        {/* Received Offers Section for Passenger Owner (When status is OPEN) */}
+                        {isOwner && req.status === 'OPEN' && req.offers.length > 0 && (
                           <div className="pt-2 border-t border-slate-100 space-y-2">
                             <span className="text-xs font-bold text-slate-700 block">
-                              Offers from Drivers ({req.offers.length}):
+                              Incoming Driver Bids ({req.offers.length}):
                             </span>
-                            <div className="space-y-1.5">
-                              {req.offers.map((offer) => (
-                                <div
-                                  key={offer.id}
-                                  className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs"
-                                >
-                                  <div>
-                                    <div className="flex items-center gap-2">
-                                      <span className="font-extrabold text-slate-900">{offer.driverName}</span>
-                                      <span className="text-[10px] bg-amber-100 text-amber-900 font-bold px-1 rounded">
-                                        ★ {offer.driverRating}
-                                      </span>
-                                      <span className="text-[10px] text-slate-500 font-medium">
-                                        {offer.vehicleMakeModel}
-                                      </span>
+                            <div className="space-y-2">
+                              {req.offers.map((offer) => {
+                                const driverPhone = offer.driverPhone || '0300-1234567';
+                                return (
+                                  <div
+                                    key={offer.id}
+                                    className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs"
+                                  >
+                                    <div className="space-y-1">
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-extrabold text-slate-900">{offer.driverName}</span>
+                                        <span className="text-[10px] bg-amber-100 text-amber-900 font-bold px-1 rounded">
+                                          ★ {offer.driverRating || 4.9}
+                                        </span>
+                                        <span className="text-[10px] text-slate-500 font-medium">
+                                          🚘 {offer.vehicleMakeModel} ({offer.vehiclePlate})
+                                        </span>
+                                      </div>
+                                      {offer.message && (
+                                        <p className="text-[11px] text-slate-600 italic">&quot;{offer.message}&quot;</p>
+                                      )}
+                                      <div className="text-[11px] font-bold text-emerald-800">
+                                        Offered Fare: Rs. {offer.offeredPrice.toLocaleString()}
+                                      </div>
                                     </div>
-                                    {offer.message && (
-                                      <p className="text-[11px] text-slate-600 mt-0.5">&quot;{offer.message}&quot;</p>
-                                    )}
-                                  </div>
 
-                                  <div className="flex items-center justify-between sm:justify-end w-full sm:w-auto gap-2">
-                                    <span className="font-black text-sm text-emerald-800">
-                                      Rs. {offer.offeredPrice.toLocaleString()}
-                                    </span>
-                                    {req.status === 'OPEN' && (
+                                    <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-end">
+                                      <a
+                                        href={getWhatsAppUrl(
+                                          driverPhone,
+                                          `Assalam-o-Alaikum ${offer.driverName}! I saw your quote of Rs. ${offer.offeredPrice.toLocaleString()} for ${oName} to ${dName} on Apni Sawari. Can we discuss pickup details?`
+                                        )}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold text-xs py-1.5 px-2.5 rounded-lg transition flex items-center gap-1"
+                                      >
+                                        <span>💬</span>
+                                        <span>Chat</span>
+                                      </a>
+                                      <a
+                                        href={getCallUrl(driverPhone)}
+                                        className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs py-1.5 px-2.5 rounded-lg transition flex items-center gap-1"
+                                      >
+                                        <span>📞</span>
+                                        <span>Call</span>
+                                      </a>
                                       <button
                                         type="button"
                                         onClick={() => handleAcceptDriverOffer(req, offer)}
-                                        className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs py-1.5 px-3 rounded-lg transition cursor-pointer"
+                                        className="bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-1.5 px-3.5 rounded-lg transition cursor-pointer shadow-xs"
                                       >
-                                        Accept Offer
+                                        ✓ Accept Offer
                                       </button>
-                                    )}
+                                    </div>
                                   </div>
-                                </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           </div>
                         )}
@@ -2823,12 +2960,12 @@ export default function Home() {
                       Sign In / Register
                     </button>
                   </div>
-                ) : myPassengerBookings.length === 0 ? (
+                ) : (myPassengerBookings.length === 0 && myConfirmedSawariRequests.length === 0) ? (
                   <div className="bg-white p-6 sm:p-8 rounded-2xl sm:rounded-3xl border border-slate-200 text-center space-y-2 shadow-2xs">
                     <span className="text-3xl block">🎫</span>
                     <h3 className="text-sm font-black text-slate-800">No active bookings yet</h3>
                     <p className="text-xs text-slate-500">
-                      You haven&apos;t booked any rides. Search for scheduled trips across Pakistan.
+                      You haven&apos;t booked any rides. Search for scheduled trips across Pakistan or post on Sawari Board.
                     </p>
                     <button
                       type="button"
@@ -2843,6 +2980,111 @@ export default function Home() {
                   </div>
                 ) : (
                   <div className="space-y-4">
+                    {/* Confirmed Custom Sawari Board Trips */}
+                    {myConfirmedSawariRequests.map((req) => {
+                      const acceptedOffer = req.offers.find((o) => o.id === req.acceptedOfferId) || req.offers[0];
+                      if (!acceptedOffer) return null;
+                      const driverPhone = acceptedOffer.driverPhone || '0300-1234567';
+
+                      return (
+                        <div
+                          key={req.id}
+                          className="bg-white p-4 sm:p-5 rounded-2xl border-2 border-emerald-300 shadow-2xs space-y-3"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs sm:text-sm font-black text-slate-900 block">
+                                  {req.originName} ➔ {req.destinationName}
+                                </span>
+                                <span className="text-[9px] bg-purple-100 text-purple-800 font-black px-1.5 py-0.2 rounded uppercase">
+                                  Custom Sawari Deal
+                                </span>
+                              </div>
+                              <span className="text-[11px] sm:text-xs text-slate-500 font-medium">
+                                📅 {req.travelDate} ({req.desiredTime}) • {req.bookingType === 'WHOLE_CAR' ? '🚗 Full Car' : `💺 ${req.seatsCount} Seats`}
+                              </span>
+                            </div>
+
+                            <span className="text-[9px] sm:text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase bg-emerald-100 text-emerald-800">
+                              ✓ Driver Confirmed
+                            </span>
+                          </div>
+
+                          {/* Boarding Voucher Card */}
+                          <div className="bg-emerald-50 text-emerald-950 p-3.5 sm:p-4 rounded-xl border border-emerald-200 space-y-3">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 bg-white p-3 rounded-xl border border-emerald-200 text-xs">
+                              <div>
+                                <span className="text-[9px] uppercase font-bold text-slate-400 block">Assigned Driver</span>
+                                <span className="font-black text-slate-900 text-xs sm:text-sm flex items-center gap-1">
+                                  <span>👤</span>
+                                  <span>{acceptedOffer.driverName}</span>
+                                  <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1 rounded font-bold">★ {acceptedOffer.driverRating || 4.9}</span>
+                                </span>
+                                <span className="text-[11px] text-slate-600 block mt-0.5 font-mono">
+                                  📞 {driverPhone}
+                                </span>
+                              </div>
+
+                              <div>
+                                <span className="text-[9px] uppercase font-bold text-slate-400 block">Vehicle</span>
+                                <span className="font-bold text-slate-900 block">
+                                  🚘 {acceptedOffer.vehicleMakeModel}
+                                </span>
+                                <span className="bg-slate-100 border border-slate-300 font-black px-1.5 py-0.2 rounded font-mono text-slate-800 text-[11px] inline-block mt-0.5">
+                                  {acceptedOffer.vehiclePlate || 'Verified Plate'}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-between bg-emerald-100/70 p-2.5 rounded-xl border border-emerald-200/80 text-xs">
+                              <span className="text-emerald-900 font-bold">Agreed Fare (Direct Cash):</span>
+                              <span className="text-sm font-black text-emerald-950">
+                                Rs. {acceptedOffer.offeredPrice.toLocaleString()}
+                              </span>
+                            </div>
+
+                            <div className="flex flex-col sm:flex-row items-center gap-2 pt-1">
+                              <a
+                                href={getWhatsAppUrl(
+                                  driverPhone,
+                                  `Assalam-o-Alaikum ${acceptedOffer.driverName} bhai, I am ${currentUser?.name || req.passengerName}. I confirmed your offer for ${req.originName} to ${req.destinationName} on ${req.travelDate} (${req.desiredTime}). Please coordinate my pickup time and location!`
+                                )}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="w-full sm:flex-1 bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 shadow-2xs"
+                              >
+                                <span>💬</span>
+                                <span>WhatsApp Driver</span>
+                              </a>
+
+                              <a
+                                href={getCallUrl(driverPhone)}
+                                className="w-full sm:flex-1 bg-slate-900 hover:bg-black text-white font-black text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 shadow-2xs"
+                              >
+                                <span>📞</span>
+                                <span>Call Driver</span>
+                              </a>
+
+                              <a
+                                href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
+                                  `Assalam-o-Alaikum! I am traveling via Apni Sawari.\nRoute: ${req.originName} to ${req.destinationName}\nDriver: ${acceptedOffer.driverName} (${driverPhone})\nCar: ${acceptedOffer.vehicleMakeModel} (${acceptedOffer.vehiclePlate})\nDeparture: ${req.travelDate} (${req.desiredTime})\nFare: Rs. ${acceptedOffer.offeredPrice.toLocaleString()}\nTrack my journey safely!`
+                                )}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="w-full sm:w-auto bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1 shadow-2xs"
+                                title="Share complete driver & car details with family for safety"
+                              >
+                                <span>🛡️</span>
+                                <span>Share with Family</span>
+                              </a>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {/* Standard Scheduled Carpool Bookings */}
                     {myPassengerBookings.map((b) => {
                       const targetRide = rides.find((r) => r.id === b.rideId);
                       const oName = targetRide ? NATIONWIDE_CITIES.find((c) => c.id === targetRide.originLocationId)?.name : 'Origin';
@@ -3480,60 +3722,170 @@ export default function Home() {
                 {passengerRequests.map((req) => {
                   const oName = NATIONWIDE_CITIES.find((c) => c.id === req.originLocationId)?.name || 'Origin';
                   const dName = NATIONWIDE_CITIES.find((c) => c.id === req.destinationLocationId)?.name || 'Destination';
-                  const alreadyOffered = req.offers.some((o) => o.driverId === currentUser?.id);
+                  const myOffer = req.offers.find((o) => o.driverId === currentUser?.id);
+                  const alreadyOffered = Boolean(myOffer);
+                  const isAcceptedByMe = req.status === 'ACCEPTED' && req.acceptedOfferId === myOffer?.id;
+                  const passengerPhone = req.passengerPhone || '0300-1234567';
 
                   return (
                     <div
                       key={req.id}
-                      className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-3"
+                      className={`bg-white p-4 sm:p-5 rounded-2xl border transition shadow-2xs space-y-3 ${
+                        isAcceptedByMe ? 'border-emerald-400 ring-2 ring-emerald-100' : 'border-slate-200'
+                      }`}
                     >
                       <div className="flex items-start justify-between">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2.5">
                           <span className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-slate-100 flex items-center justify-center text-base sm:text-lg">
                             {req.isFamilyTrip ? '👨‍👩‍👧' : '🧑'}
                           </span>
                           <div>
-                            <span className="font-black text-sm sm:text-base text-slate-900 block">
-                              {oName} ➔ {dName}
-                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className="font-black text-sm sm:text-base text-slate-900">
+                                {oName} ➔ {dName}
+                              </span>
+                              {isAcceptedByMe ? (
+                                <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded-full">
+                                  ✓ Deal Confirmed
+                                </span>
+                              ) : req.status === 'ACCEPTED' ? (
+                                <span className="bg-slate-100 text-slate-600 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                                  Booked with another driver
+                                </span>
+                              ) : null}
+                            </div>
                             <span className="text-[11px] text-slate-500 font-medium">
-                              {req.passengerName} • {req.travelDate} ({req.desiredTime})
+                              Passenger: <span className="font-bold text-slate-700">{req.passengerName}</span> • {req.travelDate} ({req.desiredTime})
                             </span>
                           </div>
                         </div>
 
                         <div className="text-right">
-                          <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase block">Budget</span>
+                          <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase block">Passenger Budget</span>
                           <span className="text-base sm:text-lg font-black text-emerald-800">
                             Rs. {req.budgetPrice.toLocaleString()}
                           </span>
                         </div>
                       </div>
 
-                      <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-                        {alreadyOffered ? (
-                          <span className="text-xs font-bold text-emerald-800 bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-200">
-                            ✓ Quote Sent
+                      {/* Travel requirements tags */}
+                      <div className="flex flex-wrap items-center gap-1.5 text-[10px] sm:text-[11px]">
+                        <span className="bg-slate-100 text-slate-700 font-semibold px-2 py-0.5 rounded-md">
+                          {req.bookingType === 'WHOLE_CAR' ? '🚗 Full Car' : `💺 ${req.seatsCount} Seats`}
+                        </span>
+                        {req.acRequired && (
+                          <span className="bg-sky-50 text-sky-800 border border-sky-200 font-semibold px-2 py-0.5 rounded-md">
+                            ❄️ AC Required
                           </span>
-                        ) : (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => handleDriverAcceptBudget(req)}
-                              className="bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-2 px-3 sm:px-3.5 rounded-xl transition cursor-pointer shadow-xs"
-                            >
-                              ⚡ Accept Budget
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleOpenCustomOfferModal(req)}
-                              className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs py-2 px-3 rounded-xl transition cursor-pointer"
-                            >
-                              Counter-Offer
-                            </button>
-                          </>
                         )}
+                        {req.isFamilyTrip && (
+                          <span className="bg-purple-50 text-purple-800 border border-purple-200 font-semibold px-2 py-0.5 rounded-md">
+                            👨‍👩‍👧 Family Trip
+                          </span>
+                        )}
+                        <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md">
+                          🧳 {req.luggageSize}
+                        </span>
                       </div>
+
+                      {req.notes && (
+                        <p className="text-xs text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-100 italic">
+                          &quot;{req.notes}&quot;
+                        </p>
+                      )}
+
+                      {/* IF PASSENGER CONFIRMED THIS DRIVER'S QUOTE */}
+                      {isAcceptedByMe ? (
+                        <div className="bg-emerald-50 text-emerald-950 p-3.5 rounded-xl border border-emerald-200 space-y-2.5">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                            <div>
+                              <span className="text-xs font-black text-emerald-900 block">
+                                🎉 Passenger {req.passengerName} Confirmed Your Quote!
+                              </span>
+                              <span className="text-[11px] text-emerald-800 font-medium">
+                                Collect Rs. {myOffer?.offeredPrice.toLocaleString()} cash upon vehicle boarding.
+                              </span>
+                            </div>
+                            <span className="text-xs font-mono font-bold text-emerald-900 bg-emerald-100 px-2 py-1 rounded">
+                              📞 {passengerPhone}
+                            </span>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-emerald-200/80">
+                            <a
+                              href={getWhatsAppUrl(
+                                passengerPhone,
+                                `Assalam-o-Alaikum ${req.passengerName}! I am your driver (${currentUser?.name || 'Driver'}). You confirmed my quote of Rs. ${myOffer?.offeredPrice.toLocaleString()} for ${oName} to ${dName} on ${req.travelDate} (${req.desiredTime}). My car is ${currentUser?.vehicle?.makeModel || 'Car'} (${currentUser?.vehicle?.plate || ''}). Please share your exact pickup landmark!`
+                              )}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex-1 min-w-[140px] bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-2 px-3 rounded-lg transition flex items-center justify-center gap-1.5 shadow-2xs"
+                            >
+                              <span>💬</span>
+                              <span>WhatsApp Passenger</span>
+                            </a>
+                            <a
+                              href={getCallUrl(passengerPhone)}
+                              className="flex-1 min-w-[120px] bg-slate-900 hover:bg-black text-white font-black text-xs py-2 px-3 rounded-lg transition flex items-center justify-center gap-1.5 shadow-2xs"
+                            >
+                              <span>📞</span>
+                              <span>Call {passengerPhone}</span>
+                            </a>
+                          </div>
+                        </div>
+                      ) : alreadyOffered ? (
+                        /* DRIVER SENT QUOTE, WAITING FOR CONFIRMATION */
+                        <div className="bg-amber-50/70 p-3 rounded-xl border border-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <div>
+                            <span className="text-xs font-bold text-amber-950 block">
+                              ✓ Your Quote: Rs. {myOffer?.offeredPrice.toLocaleString()} (Sent)
+                            </span>
+                            <span className="text-[11px] text-slate-500">
+                              Waiting for {req.passengerName} to confirm. You can also contact them directly below:
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            <a
+                              href={getWhatsAppUrl(
+                                passengerPhone,
+                                `Assalam-o-Alaikum ${req.passengerName}! I have submitted a quote of Rs. ${myOffer?.offeredPrice.toLocaleString()} for your trip from ${oName} to ${dName} on ${req.travelDate} in my ${currentUser?.vehicle?.makeModel || 'car'}. Let me know if you would like to proceed!`
+                              )}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs py-1.5 px-3 rounded-lg transition flex items-center gap-1 shadow-2xs"
+                            >
+                              <span>💬</span>
+                              <span>WhatsApp</span>
+                            </a>
+                            <a
+                              href={getCallUrl(passengerPhone)}
+                              className="bg-slate-900 hover:bg-black text-white font-black text-xs py-1.5 px-3 rounded-lg transition flex items-center gap-1 shadow-2xs"
+                            >
+                              <span>📞</span>
+                              <span>Call</span>
+                            </a>
+                          </div>
+                        </div>
+                      ) : (
+                        /* DRIVER HAS NOT OFFERED YET */
+                        <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                          <button
+                            type="button"
+                            onClick={() => handleDriverAcceptBudget(req)}
+                            className="bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-2 px-3 sm:px-3.5 rounded-xl transition cursor-pointer shadow-xs"
+                          >
+                            ⚡ Accept Budget
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenCustomOfferModal(req)}
+                            className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs py-2 px-3 rounded-xl transition cursor-pointer"
+                          >
+                            Counter-Offer
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -3683,9 +4035,9 @@ export default function Home() {
         >
           <span className="text-base">{portalMode === 'DRIVER' ? '📋' : '🎟️'}</span>
           <span className="text-[10px] mt-0.5">{portalMode === 'DRIVER' ? 'My Trips' : 'Bookings'}</span>
-          {myPassengerBookings.length > 0 && (
+          {(myPassengerBookings.length + myConfirmedSawariRequests.length) > 0 && (
             <span className="absolute top-0 right-1 w-3.5 h-3.5 bg-emerald-700 text-white rounded-full text-[9px] flex items-center justify-center font-bold">
-              {myPassengerBookings.length}
+              {myPassengerBookings.length + myConfirmedSawariRequests.length}
             </span>
           )}
         </button>
