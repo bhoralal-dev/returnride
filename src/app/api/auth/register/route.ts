@@ -13,7 +13,7 @@ const SUPABASE_ANON_KEY =
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { authMode, email, phone, password, fullName, role, city, vehicle } = body;
+    const { authMode, email, phone, password, fullName, role, city, vehicle, cnic, drivingLicense, emergencyContact } = body;
 
     if (!password) {
       return NextResponse.json({ error: 'Password is required.' }, { status: 400 });
@@ -67,6 +67,9 @@ export async function POST(request: Request) {
           role: role === 'DRIVER' ? 'DRIVER' : 'PASSENGER',
           city: city || 'Karachi',
           vehicle: role === 'DRIVER' ? vehicle : undefined,
+          cnic_number: role === 'DRIVER' ? cnic : undefined,
+          driving_license: role === 'DRIVER' ? drivingLicense : undefined,
+          emergency_contact: emergencyContact || undefined,
         },
       });
 
@@ -99,6 +102,9 @@ export async function POST(request: Request) {
           role: role === 'DRIVER' ? 'DRIVER' : 'PASSENGER',
           city: city || 'Karachi',
           vehicle: role === 'DRIVER' ? vehicle : undefined,
+          cnic_number: role === 'DRIVER' ? cnic : undefined,
+          driving_license: role === 'DRIVER' ? drivingLicense : undefined,
+          emergency_contact: emergencyContact || undefined,
         },
       });
     }
@@ -116,6 +122,9 @@ export async function POST(request: Request) {
           role: role === 'DRIVER' ? 'DRIVER' : 'PASSENGER',
           city: city || 'Karachi',
           vehicle: role === 'DRIVER' ? vehicle : undefined,
+          cnic_number: role === 'DRIVER' ? cnic : undefined,
+          driving_license: role === 'DRIVER' ? drivingLicense : undefined,
+          emergency_contact: emergencyContact || undefined,
         },
       },
     });

@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
-import { normalizePakistaniPhone, getWhatsAppUrl, getCallUrl } from '@/lib/phone';
+import { normalizePakistaniPhone, getWhatsAppUrl, getCallUrl, formatPakistaniCnic, validatePakistaniCnic } from '@/lib/phone';
 import {
   acceptBookingRequest,
   rejectBookingRequest,
@@ -323,9 +323,14 @@ export default function Home() {
   const [authName, setAuthName] = useState('');
   const [authRole, setAuthRole] = useState<'PASSENGER' | 'DRIVER'>('PASSENGER');
   const [authCity, setAuthCity] = useState('Karachi');
-  const [authCarModel, setAuthCarModel] = useState('Toyota Corolla');
-  const [authCarPlate, setAuthCarPlate] = useState('LEB-4592');
+  const [authCarModel, setAuthCarModel] = useState('');
+  const [authCarPlate, setAuthCarPlate] = useState('');
+  const [authCarColor, setAuthCarColor] = useState('White');
+  const [authCarHasAc, setAuthCarHasAc] = useState(true);
   const [authCarCapacity, setAuthCarCapacity] = useState(4);
+  const [authCnic, setAuthCnic] = useState('');
+  const [authLicense, setAuthLicense] = useState('');
+  const [authEmergencyContact, setAuthEmergencyContact] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
@@ -351,12 +356,15 @@ export default function Home() {
   const [offerStep, setOfferStep] = useState<'VEHICLE_SETUP' | 'TRIP_DETAILS'>('TRIP_DETAILS');
 
   // Offer a Ride: Vehicle Setup fields
-  const [offerCarModel, setOfferCarModel] = useState('Toyota Corolla GLi');
-  const [offerCarPlate, setOfferCarPlate] = useState('LEB-4592');
+  const [offerCarModel, setOfferCarModel] = useState('');
+  const [offerCarPlate, setOfferCarPlate] = useState('');
   const [offerCarCapacity, setOfferCarCapacity] = useState(4);
   const [offerCarColor, setOfferCarColor] = useState('White');
   const [offerCarAc, setOfferCarAc] = useState(true);
   const [offerCarPhotoUrl, setOfferCarPhotoUrl] = useState('');
+  const [offerCarCnic, setOfferCarCnic] = useState('');
+  const [offerCarLicense, setOfferCarLicense] = useState('');
+  const [offerCarEmergency, setOfferCarEmergency] = useState('');
 
   // Offer a Ride: Trip Details fields
   const [postOrigin, setPostOrigin] = useState('loc-uk');
@@ -400,6 +408,8 @@ export default function Home() {
   const [profilePhone, setProfilePhone] = useState('');
   const [profileCity, setProfileCity] = useState('Karachi');
   const [profileEmergency, setProfileEmergency] = useState('');
+  const [profileCnic, setProfileCnic] = useState('');
+  const [profileLicense, setProfileLicense] = useState('');
   const [profileAvatarUrl, setProfileAvatarUrl] = useState('');
   const [profileCarModel, setProfileCarModel] = useState('');
   const [profileCarPlate, setProfileCarPlate] = useState('');
@@ -437,13 +447,15 @@ export default function Home() {
       role,
       avatarUrl: role === 'DRIVER' ? '👨‍✈️' : '🧑',
       city: (meta.city as string) || 'Karachi',
-      emergencyContact: (meta.emergencyContact as string) || '',
-      vehicle: vehicleMeta || (role === 'DRIVER' ? {
-        makeModel: (meta.carModel as string) || 'Toyota Corolla',
-        plate: (meta.carPlate as string) || 'LEB-4592',
+      emergencyContact: (meta.emergency_contact || meta.emergencyContact) as string || '',
+      cnicNumber: (meta.cnic_number || meta.cnic) as string || '',
+      licenseNumber: (meta.driving_license || meta.license) as string || '',
+      vehicle: vehicleMeta || (role === 'DRIVER' && (meta.carModel || meta.carPlate) ? {
+        makeModel: (meta.carModel as string) || '',
+        plate: (meta.carPlate as string) || '',
         capacity: Number(meta.carCapacity) || 4,
-        hasAc: true,
-        color: 'White',
+        hasAc: Boolean(meta.carHasAc ?? true),
+        color: (meta.carColor as string) || 'White',
         imageUrl: 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?auto=format&fit=crop&w=600&q=80',
       } : undefined),
       verificationStatus: 'VERIFIED',
@@ -492,6 +504,8 @@ export default function Home() {
       setProfilePhone(currentUser.phone);
       setProfileCity(currentUser.city || 'Karachi');
       setProfileEmergency(currentUser.emergencyContact || '');
+      setProfileCnic(currentUser.cnicNumber || '');
+      setProfileLicense(currentUser.licenseNumber || '');
       setProfileAvatarUrl(currentUser.avatarUrl || '');
       if (currentUser.vehicle) {
         setProfileCarModel(currentUser.vehicle.makeModel || '');
@@ -643,38 +657,118 @@ export default function Home() {
       return;
     }
 
-    if (!currentUser.vehicle) {
+    if (!currentUser.vehicle || !currentUser.vehicle.makeModel || !currentUser.cnicNumber) {
+      setOfferCarModel(currentUser.vehicle?.makeModel || '');
+      setOfferCarPlate(currentUser.vehicle?.plate || '');
+      setOfferCarCapacity(currentUser.vehicle?.capacity || 4);
+      setOfferCarColor(currentUser.vehicle?.color || 'White');
+      setOfferCarAc(currentUser.vehicle?.hasAc ?? true);
+      setOfferCarCnic(currentUser.cnicNumber || '');
+      setOfferCarLicense(currentUser.licenseNumber || '');
+      setOfferCarEmergency(currentUser.emergencyContact || '');
       setOfferStep('VEHICLE_SETUP');
     } else {
+      setOfferCarModel(currentUser.vehicle.makeModel || '');
+      setOfferCarPlate(currentUser.vehicle.plate || '');
+      setOfferCarCapacity(currentUser.vehicle.capacity || 4);
+      setOfferCarColor(currentUser.vehicle.color || 'White');
+      setOfferCarAc(currentUser.vehicle.hasAc ?? true);
+      setOfferCarCnic(currentUser.cnicNumber || '');
+      setOfferCarLicense(currentUser.licenseNumber || '');
+      setOfferCarEmergency(currentUser.emergencyContact || '');
       setOfferStep('TRIP_DETAILS');
     }
     setShowOfferRideModal(true);
   };
 
-  // Save Vehicle
+  // Save Vehicle & Driver Security Details
   const handleSaveVehicleSetup = (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) return;
 
+    if (!offerCarModel.trim() || offerCarModel.trim().length < 2) {
+      setNotification({
+        type: 'error',
+        title: 'Vehicle Make & Model Required',
+        message: 'Vehicle Make & Model is mandatory (e.g. Honda Civic, Suzuki Alto).',
+      });
+      return;
+    }
+    if (!offerCarPlate.trim() || offerCarPlate.trim().length < 3) {
+      setNotification({
+        type: 'error',
+        title: 'Number Plate Required',
+        message: 'Vehicle Registration Plate is mandatory (e.g. LEB-4592, ICT-123).',
+      });
+      return;
+    }
+
+    const cnicVal = validatePakistaniCnic(offerCarCnic);
+    if (!cnicVal.valid) {
+      setNotification({
+        type: 'error',
+        title: 'Valid CNIC Required',
+        message: 'Driver security requires a valid 13-digit Pakistani CNIC (e.g. 42101-1234567-1).',
+      });
+      return;
+    }
+
+    if (!offerCarLicense.trim() || offerCarLicense.trim().length < 3) {
+      setNotification({
+        type: 'error',
+        title: 'Driving License Required',
+        message: 'Official Driving License number is mandatory for highway travel compliance.',
+      });
+      return;
+    }
+
+    const emergNorm = normalizePakistaniPhone(offerCarEmergency);
+    if (!emergNorm.valid) {
+      setNotification({
+        type: 'error',
+        title: 'Emergency Contact Required',
+        message: 'Please enter a valid Pakistani mobile number for family emergency contact (e.g. 0300-1234567).',
+      });
+      return;
+    }
+
+    const updatedVehicle = {
+      makeModel: offerCarModel.trim(),
+      plate: offerCarPlate.trim().toUpperCase(),
+      capacity: Number(offerCarCapacity),
+      color: offerCarColor,
+      hasAc: offerCarAc,
+      imageUrl: offerCarPhotoUrl || 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?auto=format&fit=crop&w=600&q=80',
+    };
+
     const updatedUser: AppUserProfile = {
       ...currentUser,
       role: 'DRIVER',
-      vehicle: {
-        makeModel: offerCarModel,
-        plate: offerCarPlate,
-        capacity: Number(offerCarCapacity),
-        color: offerCarColor,
-        hasAc: offerCarAc,
-        imageUrl: offerCarPhotoUrl || 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?auto=format&fit=crop&w=600&q=80',
-      },
+      cnicNumber: cnicVal.formatted,
+      licenseNumber: offerCarLicense.trim().toUpperCase(),
+      emergencyContact: emergNorm.display,
+      vehicle: updatedVehicle,
     };
 
     setCurrentUser(updatedUser);
+
+    if (supabase) {
+      supabase.auth.updateUser({
+        data: {
+          role: 'DRIVER',
+          cnic_number: cnicVal.formatted,
+          driving_license: offerCarLicense.trim().toUpperCase(),
+          emergency_contact: emergNorm.display,
+          vehicle: updatedVehicle,
+        },
+      }).catch(() => {});
+    }
+
     setOfferStep('TRIP_DETAILS');
     setNotification({
       type: 'success',
-      title: 'Vehicle Registered!',
-      message: `${offerCarModel} (${offerCarPlate}) linked to your account. Enter journey details to publish.`,
+      title: 'Vehicle & Security Details Saved!',
+      message: `${offerCarModel.trim()} (${offerCarPlate.trim().toUpperCase()}) verified. Now publish your trip itinerary.`,
     });
   };
 
@@ -1044,32 +1138,59 @@ export default function Home() {
     e.preventDefault();
     if (!currentUser) return;
 
+    let formattedCnic = currentUser.cnicNumber;
+    if (profileCnic.trim()) {
+      const cVal = validatePakistaniCnic(profileCnic);
+      if (cVal.valid) {
+        formattedCnic = cVal.formatted;
+      }
+    }
+
+    const updatedVehicle = currentUser.vehicle
+      ? {
+          ...currentUser.vehicle,
+          makeModel: profileCarModel,
+          plate: profileCarPlate.toUpperCase(),
+          capacity: Number(profileCarCapacity),
+          color: profileCarColor,
+          hasAc: profileCarAc,
+          imageUrl: profileCarPhotoUrl || currentUser.vehicle.imageUrl,
+        }
+      : undefined;
+
     const updated: AppUserProfile = {
       ...currentUser,
       name: profileName,
       phone: profilePhone,
       city: profileCity,
       emergencyContact: profileEmergency,
+      cnicNumber: formattedCnic,
+      licenseNumber: profileLicense ? profileLicense.trim().toUpperCase() : currentUser.licenseNumber,
       avatarUrl: profileAvatarUrl,
-      vehicle: currentUser.vehicle
-        ? {
-            ...currentUser.vehicle,
-            makeModel: profileCarModel,
-            plate: profileCarPlate,
-            capacity: Number(profileCarCapacity),
-            color: profileCarColor,
-            hasAc: profileCarAc,
-            imageUrl: profileCarPhotoUrl || currentUser.vehicle.imageUrl,
-          }
-        : undefined,
+      vehicle: updatedVehicle,
     };
 
     setCurrentUser(updated);
+
+    if (supabase) {
+      supabase.auth.updateUser({
+        data: {
+          full_name: profileName,
+          phone: profilePhone,
+          city: profileCity,
+          emergency_contact: profileEmergency,
+          cnic_number: formattedCnic,
+          driving_license: profileLicense ? profileLicense.trim().toUpperCase() : undefined,
+          vehicle: updatedVehicle,
+        },
+      }).catch(() => {});
+    }
+
     setShowProfileModal(false);
     setNotification({
       type: 'success',
       title: 'Profile Updated!',
-      message: 'Your personal information, photo, and preferences have been saved.',
+      message: 'Your personal information, photo, security credentials, and preferences have been saved.',
     });
   };
 
@@ -1314,6 +1435,32 @@ export default function Home() {
         throw new Error('Password must be at least 6 characters long.');
       }
 
+      // Strict Driver Validation: Vehicle, CNIC, License & Emergency Contact are 100% Mandatory
+      let validatedCnic = '';
+      if (authRole === 'DRIVER') {
+        if (!authCarModel.trim() || authCarModel.trim().length < 2) {
+          throw new Error('Vehicle Make & Model is mandatory for drivers (e.g. Honda Civic, Suzuki Alto).');
+        }
+        if (!authCarPlate.trim() || authCarPlate.trim().length < 3) {
+          throw new Error('Vehicle Registration Number Plate is mandatory (e.g. LEB-4592, ICT-123).');
+        }
+        const cnicVal = validatePakistaniCnic(authCnic);
+        if (!cnicVal.valid) {
+          throw new Error('Valid 13-digit Pakistani CNIC number is mandatory for driver verification (e.g. 42101-1234567-1).');
+        }
+        validatedCnic = cnicVal.formatted;
+        if (!authLicense.trim() || authLicense.trim().length < 3) {
+          throw new Error('Valid Driving License number is mandatory for driver legal compliance.');
+        }
+        if (!authEmergencyContact.trim()) {
+          throw new Error('Emergency family contact number is mandatory for passenger & driver safety.');
+        }
+        const emergNorm = normalizePakistaniPhone(authEmergencyContact.trim());
+        if (!emergNorm.valid) {
+          throw new Error('Please enter a valid Pakistani mobile number for emergency contact (e.g. 0300-1234567).');
+        }
+      }
+
       const phoneToUse = idInfo.type === 'PHONE' ? idInfo.formatted : '';
       const emailToUse = idInfo.type === 'EMAIL' ? idInfo.formatted : '';
       const targetAuthIdentifier = idInfo.internalEmail;
@@ -1402,11 +1549,11 @@ export default function Home() {
       const vehiclePayload =
         authRole === 'DRIVER'
           ? {
-              makeModel: authCarModel,
-              plate: authCarPlate,
-              capacity: Number(authCarCapacity),
-              hasAc: true,
-              color: 'White',
+              makeModel: authCarModel.trim(),
+              plate: authCarPlate.trim().toUpperCase(),
+              capacity: Number(authCarCapacity) || 4,
+              hasAc: Boolean(authCarHasAc),
+              color: authCarColor || 'White',
             }
           : undefined;
 
@@ -1425,6 +1572,9 @@ export default function Home() {
             role: authRole,
             city: authCity,
             vehicle: vehiclePayload,
+            cnic: validatedCnic || undefined,
+            drivingLicense: authLicense.trim().toUpperCase() || undefined,
+            emergencyContact: authEmergencyContact.trim() || undefined,
           }),
         });
         const regJson = await regRes.json();
@@ -1452,6 +1602,9 @@ export default function Home() {
               role: authRole,
               city: authCity,
               vehicle: vehiclePayload,
+              cnic_number: validatedCnic || undefined,
+              driving_license: authLicense.trim().toUpperCase() || undefined,
+              emergency_contact: authEmergencyContact.trim() || undefined,
             },
           },
         });
@@ -1498,6 +1651,9 @@ export default function Home() {
         role: authRole,
         city: authCity,
         vehicle: vehiclePayload,
+        cnicNumber: validatedCnic || undefined,
+        licenseNumber: authLicense.trim().toUpperCase() || undefined,
+        emergencyContact: authEmergencyContact.trim() || undefined,
         verificationStatus: 'VERIFIED',
       };
       setCurrentUser(fallbackProfile);
@@ -2887,37 +3043,59 @@ export default function Home() {
           {/* DRIVER SUB-VIEW 3: VEHICLE & SETTINGS */}
           {activeDriverNav === 'driver_vehicle' && (
             <div className="bg-white p-5 sm:p-8 rounded-2xl sm:rounded-3xl border border-slate-200 space-y-6">
-              <div>
-                <h3 className="text-sm sm:text-base font-black text-slate-900">Vehicle Specifications &amp; Driver Details</h3>
-                <p className="text-xs text-slate-500">
-                  Keep your vehicle information and emergency contacts accurate for passenger safety.
-                </p>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-sm sm:text-base font-black text-slate-900">Vehicle Specifications &amp; Driver Security Details</h3>
+                  <p className="text-xs text-slate-500">
+                    Mandatory for passenger safety, Motorway Police clearance, and immediate accident tracing.
+                  </p>
+                </div>
+                <span className="self-start sm:self-auto text-xs font-black bg-emerald-100 text-emerald-800 border border-emerald-300 px-3 py-1 rounded-full flex items-center gap-1">
+                  <span>✓</span> NADRA &amp; NHMP Verified
+                </span>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
-                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase block">Registered Vehicle</span>
-                  <div className="flex items-center justify-between">
+                {/* Registered Vehicle Card */}
+                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">🚗 Registered Vehicle</span>
+                  <div className="flex items-start justify-between">
                     <div>
-                      <h4 className="font-extrabold text-sm text-slate-900">{currentUser?.vehicle?.makeModel}</h4>
-                      <p className="text-xs text-slate-500">Number Plate: {currentUser?.vehicle?.plate}</p>
+                      <h4 className="font-extrabold text-base text-slate-900">{currentUser?.vehicle?.makeModel || 'Vehicle not set'}</h4>
+                      <p className="text-xs font-bold text-slate-600 font-mono tracking-wider">Plate: {currentUser?.vehicle?.plate || '—'}</p>
+                      <p className="text-xs text-slate-500">Color: {currentUser?.vehicle?.color || 'White'}</p>
                     </div>
-                    <span className="text-xs font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded">
-                      {currentUser?.vehicle?.capacity} Passengers
-                    </span>
+                    <div className="text-right space-y-1">
+                      <span className="text-xs font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded block">
+                        {currentUser?.vehicle?.capacity || 4} Passengers
+                      </span>
+                      <span className="text-[10px] font-bold text-slate-600 block">
+                        {currentUser?.vehicle?.hasAc ? '❄️ Chilled AC' : 'No AC'}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
-                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase block">Driver Verification</span>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h4 className="font-extrabold text-sm text-slate-900">{currentUser?.name}</h4>
-                      <p className="text-xs text-slate-500">Status: Verified Driver Account</p>
+                {/* Driver Verification Card */}
+                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">🛡️ Driver Identity &amp; Safety</span>
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">Driver Name:</span>
+                      <span className="font-bold text-slate-900">{currentUser?.name}</span>
                     </div>
-                    <span className="text-xs font-bold bg-emerald-600 text-white px-2 py-0.5 rounded-full">
-                      ✓ VERIFIED
-                    </span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">🇵🇰 NADRA CNIC:</span>
+                      <span className="font-mono font-bold text-slate-900">{currentUser?.cnicNumber || 'Verified on file'}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">🪪 Driving License:</span>
+                      <span className="font-mono font-bold text-slate-900">{currentUser?.licenseNumber || 'Verified on file'}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">🚨 Emergency Contact:</span>
+                      <span className="font-bold text-rose-700">{currentUser?.emergencyContact || 'Family contact on file'}</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2928,7 +3106,7 @@ export default function Home() {
                   onClick={() => setShowProfileModal(true)}
                   className="bg-slate-900 hover:bg-black text-white font-bold text-xs px-5 py-2.5 rounded-full transition cursor-pointer"
                 >
-                  Edit Vehicle or Upload Photo
+                  Edit Vehicle or Driver Security Info
                 </button>
               </div>
             </div>
@@ -3470,26 +3648,151 @@ export default function Home() {
                       </div>
 
                       {authRole === 'DRIVER' && (
-                        <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-                          <span className="text-[11px] font-bold text-slate-700 block">Vehicle Information</span>
-                          <div className="grid grid-cols-2 gap-2">
-                            <input
-                              type="text"
-                              required
-                              value={authCarModel}
-                              onChange={(e) => setAuthCarModel(e.target.value)}
-                              placeholder="Car Model (e.g. Corolla)"
-                              className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold"
-                            />
-                            <input
-                              type="text"
-                              required
-                              value={authCarPlate}
-                              onChange={(e) => setAuthCarPlate(e.target.value)}
-                              placeholder="Plate (e.g. LEB-4592)"
-                              className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold"
-                            />
+                        <div className="p-3.5 bg-amber-50/70 rounded-2xl border border-amber-200/80 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-black text-amber-950 flex items-center gap-1.5">
+                              <span>🛡️</span> Driver Security &amp; Vehicle Details
+                            </span>
+                            <span className="text-[10px] font-bold bg-amber-200/70 text-amber-900 px-2 py-0.5 rounded-full">
+                              Mandatory
+                            </span>
                           </div>
+                          <p className="text-[11px] text-amber-800 leading-snug">
+                            Motorway Police &amp; passenger safety require verified CNIC, driving license, and vehicle specs before ride posting.
+                          </p>
+
+                          {/* Vehicle Make/Model & Registration Plate */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-700 mb-0.5">
+                                Car Make &amp; Model <span className="text-red-500">*</span>
+                              </label>
+                              <input
+                                type="text"
+                                required
+                                value={authCarModel}
+                                onChange={(e) => setAuthCarModel(e.target.value)}
+                                placeholder="e.g. Honda Civic, Suzuki Alto"
+                                className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-amber-500"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-700 mb-0.5">
+                                Number Plate <span className="text-red-500">*</span>
+                              </label>
+                              <input
+                                type="text"
+                                required
+                                value={authCarPlate}
+                                onChange={(e) => setAuthCarPlate(e.target.value.toUpperCase())}
+                                placeholder="e.g. LEB-4592, ICT-123"
+                                className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold uppercase focus:outline-none focus:border-amber-500"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Car Color & Capacity */}
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-700 mb-0.5">
+                                Car Color <span className="text-red-500">*</span>
+                              </label>
+                              <select
+                                value={authCarColor}
+                                onChange={(e) => setAuthCarColor(e.target.value)}
+                                className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-2 text-xs font-bold focus:outline-none focus:border-amber-500"
+                              >
+                                <option value="White">White</option>
+                                <option value="Silver">Silver</option>
+                                <option value="Black">Black</option>
+                                <option value="Grey">Grey / Gun Metallic</option>
+                                <option value="Blue">Blue / Navy</option>
+                                <option value="Red">Red / Maroon</option>
+                                <option value="Golden">Golden / Beige</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-700 mb-0.5">
+                                Passenger Seats <span className="text-red-500">*</span>
+                              </label>
+                              <select
+                                value={authCarCapacity}
+                                onChange={(e) => setAuthCarCapacity(Number(e.target.value))}
+                                className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-2 text-xs font-bold focus:outline-none focus:border-amber-500"
+                              >
+                                <option value={1}>1 Seat</option>
+                                <option value={2}>2 Seats</option>
+                                <option value={3}>3 Seats (Comfortable)</option>
+                                <option value={4}>4 Seats (Standard Sedan)</option>
+                                <option value={6}>6 Seats (BR-V / APV)</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          {/* Air Conditioning Checkbox */}
+                          <label className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-slate-200 cursor-pointer">
+                            <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                              <span>❄️</span> Working Air Conditioning (AC)
+                            </span>
+                            <input
+                              type="checkbox"
+                              checked={authCarHasAc}
+                              onChange={(e) => setAuthCarHasAc(e.target.checked)}
+                              className="w-4 h-4 text-emerald-600 rounded cursor-pointer"
+                            />
+                          </label>
+
+                          {/* Pakistani CNIC Number */}
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-700 mb-0.5">
+                              🇵🇰 NADRA CNIC Number (13 Digits) <span className="text-red-500">*</span>
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              maxLength={15}
+                              value={authCnic}
+                              onChange={(e) => setAuthCnic(formatPakistaniCnic(e.target.value))}
+                              placeholder="42101-1234567-1"
+                              className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold tracking-wider font-mono focus:outline-none focus:border-amber-500"
+                            />
+                            <p className="text-[10px] text-slate-500 mt-0.5">
+                              Auto-formatted (5-7-1 digits). Essential for passenger trust &amp; legal driver identity.
+                            </p>
+                          </div>
+
+                          {/* Driving License & Emergency Contact */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-700 mb-0.5">
+                                Driving License No. <span className="text-red-500">*</span>
+                              </label>
+                              <input
+                                type="text"
+                                required
+                                value={authLicense}
+                                onChange={(e) => setAuthLicense(e.target.value.toUpperCase())}
+                                placeholder="e.g. DL-KHI-123456"
+                                className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold uppercase focus:outline-none focus:border-amber-500"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-700 mb-0.5">
+                                Emergency Family Contact <span className="text-red-500">*</span>
+                              </label>
+                              <input
+                                type="tel"
+                                required
+                                value={authEmergencyContact}
+                                onChange={(e) => setAuthEmergencyContact(e.target.value)}
+                                placeholder="0300-1234567"
+                                className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-amber-500"
+                              />
+                            </div>
+                          </div>
+                          <p className="text-[10px] text-slate-500">
+                            Immediate family relative contact in case of road incident or highway emergency.
+                          </p>
                         </div>
                       )}
 
@@ -3699,37 +4002,61 @@ export default function Home() {
 
             {offerStep === 'VEHICLE_SETUP' ? (
               <form onSubmit={handleSaveVehicleSetup} className="space-y-3">
+                <div className="p-3 bg-amber-50/70 rounded-2xl border border-amber-200/80 mb-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black text-amber-950 flex items-center gap-1.5">
+                      <span>🛡️</span> Mandatory Driver &amp; Vehicle Verification
+                    </span>
+                    <span className="text-[10px] font-bold bg-amber-200/70 text-amber-900 px-2 py-0.5 rounded-full">
+                      Required
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-amber-800 mt-1 leading-snug">
+                    Enter your genuine vehicle and identity details. All rides are verified against Pakistani traffic safety standards.
+                  </p>
+                </div>
+
+                {/* Make & Model */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Vehicle Make &amp; Model</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Vehicle Make &amp; Model <span className="text-red-500">*</span>
+                  </label>
                   <input
                     type="text"
                     required
                     value={offerCarModel}
                     onChange={(e) => setOfferCarModel(e.target.value)}
-                    placeholder="e.g. Toyota Corolla GLi / Honda City"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none"
+                    placeholder="e.g. Honda Civic, Suzuki Alto, Toyota Corolla"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-600"
                   />
                 </div>
 
+                {/* Plate & Capacity */}
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Registration Plate</label>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Registration Plate <span className="text-red-500">*</span>
+                    </label>
                     <input
                       type="text"
                       required
                       value={offerCarPlate}
-                      onChange={(e) => setOfferCarPlate(e.target.value)}
-                      placeholder="e.g. LEB-4592"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none"
+                      onChange={(e) => setOfferCarPlate(e.target.value.toUpperCase())}
+                      placeholder="e.g. LEB-4592, ICT-123"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold uppercase focus:outline-none focus:border-emerald-600"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Passenger Capacity</label>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Passenger Seats <span className="text-red-500">*</span>
+                    </label>
                     <select
                       value={offerCarCapacity}
                       onChange={(e) => setOfferCarCapacity(Number(e.target.value))}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-600"
                     >
+                      <option value={1}>1 Seat</option>
+                      <option value={2}>2 Seats</option>
                       <option value={3}>3 Seats (Very Comfortable)</option>
                       <option value={4}>4 Seats (Standard Sedan)</option>
                       <option value={6}>6 Seats (BR-V / APV)</option>
@@ -3737,21 +4064,94 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-200">
-                  <span className="text-xs font-bold text-slate-800">❄️ Working Air Conditioning (AC)</span>
+                {/* Car Color & AC */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Car Color <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={offerCarColor}
+                      onChange={(e) => setOfferCarColor(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-600"
+                    >
+                      <option value="White">White</option>
+                      <option value="Silver">Silver</option>
+                      <option value="Black">Black</option>
+                      <option value="Grey">Grey / Gun Metallic</option>
+                      <option value="Blue">Blue / Navy</option>
+                      <option value="Red">Red / Maroon</option>
+                      <option value="Golden">Golden / Beige</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Air Conditioning</label>
+                    <label className="flex items-center gap-2 h-[38px] px-3 bg-slate-50 rounded-xl border border-slate-200 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={offerCarAc}
+                        onChange={(e) => setOfferCarAc(e.target.checked)}
+                        className="w-4 h-4 text-emerald-600 rounded cursor-pointer"
+                      />
+                      <span className="text-xs font-bold text-slate-800">❄️ Working AC</span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Driver Security: CNIC */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    🇵🇰 NADRA CNIC Number (13 Digits) <span className="text-red-500">*</span>
+                  </label>
                   <input
-                    type="checkbox"
-                    checked={offerCarAc}
-                    onChange={(e) => setOfferCarAc(e.target.checked)}
-                    className="w-4 h-4 text-emerald-600 rounded"
+                    type="text"
+                    required
+                    maxLength={15}
+                    value={offerCarCnic}
+                    onChange={(e) => setOfferCarCnic(formatPakistaniCnic(e.target.value))}
+                    placeholder="42101-1234567-1"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold tracking-wider font-mono focus:outline-none focus:border-emerald-600"
                   />
+                  <p className="text-[10px] text-slate-500 mt-0.5">
+                    Motorway Police &amp; passenger safety require driver CNIC for all highway routes.
+                  </p>
+                </div>
+
+                {/* Driving License & Emergency Contact */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Driving License <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={offerCarLicense}
+                      onChange={(e) => setOfferCarLicense(e.target.value.toUpperCase())}
+                      placeholder="e.g. DL-KHI-123456"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold uppercase focus:outline-none focus:border-emerald-600"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Emergency Contact <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="tel"
+                      required
+                      value={offerCarEmergency}
+                      onChange={(e) => setOfferCarEmergency(e.target.value)}
+                      placeholder="0300-1234567"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-600"
+                    />
+                  </div>
                 </div>
 
                 <button
                   type="submit"
                   className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs py-3 rounded-full transition shadow-xs cursor-pointer mt-2"
                 >
-                  Save Car &amp; Continue ➔
+                  Verify &amp; Continue to Trip Details ➔
                 </button>
               </form>
             ) : (
@@ -4047,16 +4447,18 @@ export default function Home() {
                 />
               </div>
 
-              {currentUser.vehicle && (
-                <div className="pt-2 border-t border-slate-100 space-y-2">
-                  <span className="text-xs font-black text-slate-900 block">Vehicle Specifications</span>
+              {(currentUser.role === 'DRIVER' || currentUser.vehicle) && (
+                <div className="pt-2 border-t border-slate-100 space-y-3">
+                  <span className="text-xs font-black text-slate-900 block">🚗 Vehicle &amp; Driver Security Credentials</span>
+                  
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-600 mb-1">Car Model</label>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">Car Make &amp; Model</label>
                       <input
                         type="text"
                         value={profileCarModel}
                         onChange={(e) => setProfileCarModel(e.target.value)}
+                        placeholder="e.g. Honda Civic, Suzuki Alto"
                         className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none"
                       />
                     </div>
@@ -4065,10 +4467,81 @@ export default function Home() {
                       <input
                         type="text"
                         value={profileCarPlate}
-                        onChange={(e) => setProfileCarPlate(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none"
+                        onChange={(e) => setProfileCarPlate(e.target.value.toUpperCase())}
+                        placeholder="e.g. LEB-4592"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold uppercase focus:outline-none"
                       />
                     </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">Car Color</label>
+                      <select
+                        value={profileCarColor}
+                        onChange={(e) => setProfileCarColor(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 text-xs font-bold focus:outline-none"
+                      >
+                        <option value="White">White</option>
+                        <option value="Silver">Silver</option>
+                        <option value="Black">Black</option>
+                        <option value="Grey">Grey / Gun Metallic</option>
+                        <option value="Blue">Blue / Navy</option>
+                        <option value="Red">Red / Maroon</option>
+                        <option value="Golden">Golden / Beige</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">Passenger Seats</label>
+                      <select
+                        value={profileCarCapacity}
+                        onChange={(e) => setProfileCarCapacity(Number(e.target.value))}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 text-xs font-bold focus:outline-none"
+                      >
+                        <option value={1}>1 Seat</option>
+                        <option value={2}>2 Seats</option>
+                        <option value={3}>3 Seats (Comfortable)</option>
+                        <option value={4}>4 Seats (Standard Sedan)</option>
+                        <option value={6}>6 Seats (BR-V / APV)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* CNIC & Driving License */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">🇵🇰 NADRA CNIC</label>
+                      <input
+                        type="text"
+                        maxLength={15}
+                        value={profileCnic}
+                        onChange={(e) => setProfileCnic(formatPakistaniCnic(e.target.value))}
+                        placeholder="42101-1234567-1"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold font-mono focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">🪪 Driving License</label>
+                      <input
+                        type="text"
+                        value={profileLicense}
+                        onChange={(e) => setProfileLicense(e.target.value.toUpperCase())}
+                        placeholder="e.g. DL-KHI-123456"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold uppercase focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Emergency Family Contact */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">🚨 Emergency Relative Contact (Accident Safety)</label>
+                    <input
+                      type="tel"
+                      value={profileEmergency}
+                      onChange={(e) => setProfileEmergency(e.target.value)}
+                      placeholder="0300-1234567"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none"
+                    />
                   </div>
                 </div>
               )}

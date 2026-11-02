@@ -52,3 +52,22 @@ export function getCallUrl(phone: string): string {
   const norm = normalizePakistaniPhone(phone);
   return `tel:${norm.formatted || phone}`;
 }
+
+export function formatPakistaniCnic(raw: string): string {
+  if (!raw) return '';
+  const digits = raw.replace(/\D/g, '').slice(0, 13);
+  if (digits.length <= 5) return digits;
+  if (digits.length <= 12) return `${digits.slice(0, 5)}-${digits.slice(5)}`;
+  return `${digits.slice(0, 5)}-${digits.slice(5, 12)}-${digits.slice(12)}`;
+}
+
+export function validatePakistaniCnic(cnic: string): { valid: boolean; formatted: string; digits: string } {
+  if (!cnic) return { valid: false, formatted: '', digits: '' };
+  const digits = cnic.replace(/\D/g, '');
+  const valid = digits.length === 13;
+  return {
+    valid,
+    formatted: formatPakistaniCnic(digits),
+    digits,
+  };
+}
