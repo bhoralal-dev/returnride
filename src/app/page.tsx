@@ -222,6 +222,82 @@ const INITIAL_RIDES: Ride[] = [
     createdAt: '2026-10-27T08:00:00Z',
     updatedAt: '2026-10-27T08:00:00Z',
   },
+  {
+    id: 'ride-105',
+    driverId: 'driver-tariq',
+    driverName: 'Driver Tariq Khan',
+    driverPhone: '0300-9876543',
+    vehicleId: 'veh-corolla-mpk',
+    vehicleMakeModel: 'Toyota Corolla GLi',
+    vehiclePlate: 'LEB-4592',
+    vehicleColor: 'White',
+    originLocationId: 'loc-mpk',
+    destinationLocationId: 'loc-khi',
+    departureTime: '2026-11-03T08:00:00Z',
+    bookingMode: 'WHOLE_CAR_OR_SEATS',
+    capacity: 4,
+    bookedSeatsCount: 0,
+    wholeCarPrice: 13000,
+    seatPrice: 3200,
+    status: 'PUBLISHED',
+    autoReopenOnCancellation: true,
+    notes: 'Direct from Mirpur Khas to Karachi via Hyderabad M-9. Chilled AC, neat family car.',
+    driverTier: 'TOP_RATED_DRIVER',
+    roundTripAllowed: true,
+    roundTripWholeCarPrice: 22000,
+    travelComfort: {
+      acType: 'CHILLED_AC',
+      maxInBack: 2,
+      luggageCapacity: 'FULL_TRUNK',
+      namazBreak: true,
+      tollsIncluded: true,
+      familyOnboard: true,
+    },
+    routeStops: [
+      { id: 'stop-hyd-mpk', name: 'Hyderabad Bypass', distanceKm: 70, seatPrice: 1200, wholeCarPrice: 4800 },
+      { id: 'stop-nb-mpk', name: 'Nooriabad M-9', distanceKm: 150, seatPrice: 2200, wholeCarPrice: 8800 },
+      { id: 'stop-khi-mpk', name: 'Karachi (Sohrab Goth / Cantt)', distanceKm: 245, seatPrice: 3200, wholeCarPrice: 13000 },
+    ],
+    createdAt: '2026-10-28T09:00:00Z',
+    updatedAt: '2026-10-28T09:00:00Z',
+  },
+  {
+    id: 'ride-106',
+    driverId: 'driver-zafar',
+    driverName: 'Zafar Iqbal',
+    driverPhone: '0303-5566778',
+    vehicleId: 'veh-civic-fsd',
+    vehicleMakeModel: 'Honda Civic Oriel',
+    vehiclePlate: 'FS-9912',
+    vehicleColor: 'Black',
+    originLocationId: 'loc-fsd',
+    destinationLocationId: 'loc-pesh',
+    departureTime: '2026-11-03T08:30:00Z',
+    bookingMode: 'WHOLE_CAR_OR_SEATS',
+    capacity: 4,
+    bookedSeatsCount: 1,
+    wholeCarPrice: 19500,
+    seatPrice: 4800,
+    status: 'PUBLISHED',
+    autoReopenOnCancellation: true,
+    notes: 'Faisalabad to Peshawar direct via M-4 / M-1 Motorway. Clean leather seats, chilled AC.',
+    driverTier: 'TOP_RATED_DRIVER',
+    roundTripAllowed: true,
+    roundTripWholeCarPrice: 34000,
+    travelComfort: {
+      acType: 'CHILLED_AC',
+      maxInBack: 2,
+      luggageCapacity: 'FULL_TRUNK',
+      namazBreak: true,
+      tollsIncluded: true,
+    },
+    routeStops: [
+      { id: 'stop-isb-fsd', name: 'Islamabad / Rawalpindi M-2 Toll', distanceKm: 290, seatPrice: 3200, wholeCarPrice: 13000 },
+      { id: 'stop-pesh-fsd', name: 'Peshawar Ring Road', distanceKm: 440, seatPrice: 4800, wholeCarPrice: 19500 },
+    ],
+    createdAt: '2026-10-28T10:00:00Z',
+    updatedAt: '2026-10-28T10:00:00Z',
+  },
 ];
 
 const INITIAL_PASSENGER_REQUESTS: PassengerRideRequest[] = [
@@ -317,8 +393,8 @@ export default function Home() {
   // Main Portal Mode: 'PASSENGER' (Finding/Booking Rides) vs 'DRIVER' (Driver Dashboard & Controls)
   const [portalMode, setPortalMode] = useState<'PASSENGER' | 'DRIVER'>('PASSENGER');
 
-  // Passenger Navigation View: 'find_ride' | 'sawari_board' | 'my_bookings' | 'how_it_works'
-  const [activePassengerNav, setActivePassengerNav] = useState<'find_ride' | 'sawari_board' | 'my_bookings' | 'how_it_works'>('find_ride');
+  // Passenger Navigation View: 'find_ride' | 'my_bookings' | 'how_it_works'
+  const [activePassengerNav, setActivePassengerNav] = useState<'find_ride' | 'my_bookings' | 'how_it_works'>('find_ride');
 
   // Driver Navigation View: 'driver_trips' | 'driver_leads' | 'driver_vehicle'
   const [activeDriverNav, setActiveDriverNav] = useState<'driver_trips' | 'driver_leads' | 'driver_vehicle'>('driver_trips');
@@ -328,9 +404,9 @@ export default function Home() {
   const [passengerRequests, setPassengerRequests] = useState<PassengerRideRequest[]>(INITIAL_PASSENGER_REQUESTS);
   const [bookings, setBookings] = useState<BookingRequest[]>(INITIAL_BOOKINGS);
 
-  // Horizontal Search Capsule State
-  const [searchOrigin, setSearchOrigin] = useState<string>('loc-uk');
-  const [searchDest, setSearchDest] = useState<string>('loc-khi');
+  // Horizontal Search Capsule State (Defaults to ALL Pakistan so all driver listings are visible immediately)
+  const [searchOrigin, setSearchOrigin] = useState<string>('ALL');
+  const [searchDest, setSearchDest] = useState<string>('ALL');
   const [searchSeatsCount, setSearchSeatsCount] = useState<number>(1);
   const [hasSearched, setHasSearched] = useState<boolean>(true);
 
@@ -727,9 +803,18 @@ export default function Home() {
   const originCityName = searchOrigin === 'ALL' ? 'All Pakistan' : (NATIONWIDE_CITIES.find((c) => c.id === searchOrigin)?.name || 'Origin');
   const destCityName = searchDest === 'ALL' ? 'Anywhere in Pakistan' : (NATIONWIDE_CITIES.find((c) => c.id === searchDest)?.name || 'Destination');
 
-  // Filter rides matching search criteria
+  // Passenger City Location for Priority Sorting (Default: currentUser.city or Karachi)
+  const userCityName = currentUser?.city || 'Karachi';
+  const userCityObj = useMemo(() => {
+    return NATIONWIDE_CITIES.find(
+      (c) => c.name.toLowerCase() === userCityName.toLowerCase() || userCityName.toLowerCase().includes(c.name.toLowerCase())
+    );
+  }, [userCityName]);
+  const userCityId = userCityObj?.id;
+
+  // Filter rides matching search criteria with Location Priority Sorting
   const matchingRides = useMemo(() => {
-    return rides.filter((r) => {
+    const filtered = rides.filter((r) => {
       if (r.status === 'CANCELLED' || r.status === 'COMPLETED') return false;
 
       // Origin and destination match (allows "ALL" for nationwide network view)
@@ -744,7 +829,22 @@ export default function Home() {
 
       return true;
     });
-  }, [rides, searchOrigin, searchDest, activeTagFilter]);
+
+    // PRIORITY SORTING:
+    // If browsing All Pakistan, prioritize rides departing from near user's city first, then arriving in user's city, then the rest
+    return [...filtered].sort((a, b) => {
+      if (searchOrigin === 'ALL') {
+        const aMatchesOrigin = userCityId && a.originLocationId === userCityId ? 1 : 0;
+        const bMatchesOrigin = userCityId && b.originLocationId === userCityId ? 1 : 0;
+        if (aMatchesOrigin !== bMatchesOrigin) return bMatchesOrigin - aMatchesOrigin;
+
+        const aMatchesDest = userCityId && a.destinationLocationId === userCityId ? 1 : 0;
+        const bMatchesDest = userCityId && b.destinationLocationId === userCityId ? 1 : 0;
+        if (aMatchesDest !== bMatchesDest) return bMatchesDest - aMatchesDest;
+      }
+      return 0;
+    });
+  }, [rides, searchOrigin, searchDest, activeTagFilter, userCityId]);
 
   // Driver metrics & listings
   const myDriverRides = useMemo(() => {
@@ -793,6 +893,20 @@ export default function Home() {
       return isOwner && r.status === 'ACCEPTED';
     });
   }, [passengerRequests, currentUser]);
+
+  const myOpenSawariRequests = useMemo(() => {
+    if (!currentUser) return [];
+    return passengerRequests.filter((r) => {
+      const isOwner = (
+        r.passengerId === currentUser.id ||
+        r.passengerName.toLowerCase() === currentUser.name.toLowerCase() ||
+        (r.passengerPhone && currentUser.phone && r.passengerPhone === currentUser.phone)
+      );
+      return isOwner && r.status === 'OPEN';
+    });
+  }, [passengerRequests, currentUser]);
+
+  const myPassengerTotalCount = myPassengerBookings.length + myConfirmedSawariRequests.length + myOpenSawariRequests.length;
 
   // Handle Search Submission
   const handleSearchSubmit = (e: React.FormEvent) => {
@@ -2034,23 +2148,6 @@ export default function Home() {
 
               <button
                 type="button"
-                onClick={() => setActivePassengerNav('sawari_board')}
-                className={`px-3.5 py-2 rounded-xl transition cursor-pointer relative ${
-                  activePassengerNav === 'sawari_board'
-                    ? 'text-emerald-900 bg-emerald-50 font-black'
-                    : 'hover:text-slate-900 hover:bg-slate-100/60'
-                }`}
-              >
-                📢 Sawari Board
-                {openSawariRequestsCount > 0 && (
-                  <span className="ml-1.5 px-1.5 py-0.2 bg-emerald-600 text-white text-[10px] font-black rounded-full">
-                    {openSawariRequestsCount}
-                  </span>
-                )}
-              </button>
-
-              <button
-                type="button"
                 onClick={() => {
                   if (!currentUser) {
                     setAuthTab('SIGNIN');
@@ -2066,9 +2163,9 @@ export default function Home() {
                 }`}
               >
                 🎟️ My Bookings
-                {(myPassengerBookings.length + myConfirmedSawariRequests.length) > 0 && (
+                {myPassengerTotalCount > 0 && (
                   <span className="ml-1.5 px-1.5 py-0.2 bg-emerald-700 text-white text-[10px] font-black rounded-full">
-                    {myPassengerBookings.length + myConfirmedSawariRequests.length}
+                    {myPassengerTotalCount}
                   </span>
                 )}
               </button>
@@ -2158,15 +2255,17 @@ export default function Home() {
               )
             )}
 
-            {/* Offer a Ride Button */}
-            <button
-              type="button"
-              onClick={handleOpenOfferRide}
-              className="border border-emerald-600 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-[11px] sm:text-xs px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-full transition flex items-center gap-1 shadow-2xs cursor-pointer"
-            >
-              <span>+</span>
-              <span className="hidden sm:inline">Offer a Ride</span>
-            </button>
+            {/* Offer a Ride Button (ONLY FOR DRIVERS) */}
+            {portalMode === 'DRIVER' && (
+              <button
+                type="button"
+                onClick={handleOpenOfferRide}
+                className="border border-emerald-600 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-[11px] sm:text-xs px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-full transition flex items-center gap-1 shadow-2xs cursor-pointer"
+              >
+                <span>+</span>
+                <span className="hidden sm:inline">Offer a Ride</span>
+              </button>
+            )}
 
             {/* User Profile Pill or Sign In / Register Buttons */}
             {currentUser ? (
@@ -2365,6 +2464,17 @@ export default function Home() {
                   <button
                     type="button"
                     onClick={() => {
+                      setSearchOrigin('loc-mpk');
+                      setSearchDest('loc-khi');
+                      setHasSearched(true);
+                    }}
+                    className="px-2.5 py-1 bg-white hover:bg-emerald-50 hover:text-emerald-900 text-slate-700 rounded-full border border-slate-200 transition font-bold cursor-pointer shrink-0 text-[11px]"
+                  >
+                    Mirpur Khas ➔ Karachi
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
                       setSearchOrigin('loc-uk');
                       setSearchDest('loc-khi');
                       setHasSearched(true);
@@ -2372,6 +2482,17 @@ export default function Home() {
                     className="px-2.5 py-1 bg-white hover:bg-emerald-50 hover:text-emerald-900 text-slate-700 rounded-full border border-slate-200 transition font-bold cursor-pointer shrink-0 text-[11px]"
                   >
                     Umerkot ➔ Karachi
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchOrigin('loc-fsd');
+                      setSearchDest('loc-pesh');
+                      setHasSearched(true);
+                    }}
+                    className="px-2.5 py-1 bg-white hover:bg-emerald-50 hover:text-emerald-900 text-slate-700 rounded-full border border-slate-200 transition font-bold cursor-pointer shrink-0 text-[11px]"
+                  >
+                    Faisalabad ➔ Peshawar
                   </button>
                   <button
                     type="button"
@@ -2478,11 +2599,11 @@ export default function Home() {
 
                   <button
                     type="button"
-                    onClick={() => setActivePassengerNav('sawari_board')}
-                    className="text-xs text-emerald-700 hover:text-emerald-900 font-black flex items-center gap-1 cursor-pointer"
+                    onClick={handleOpenPostSawariRequest}
+                    className="text-xs text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 font-bold px-3 py-1.5 rounded-full flex items-center gap-1 cursor-pointer transition shadow-2xs"
                   >
-                    <span>Post on Sawari Board</span>
-                    <span>➔</span>
+                    <span>+</span>
+                    <span>Request Custom Ride</span>
                   </button>
                 </div>
 
@@ -2495,14 +2616,14 @@ export default function Home() {
                         No direct scheduled rides found for this route
                       </h3>
                       <p className="text-xs text-slate-500 max-w-md mx-auto">
-                        Post your request on the Sawari Board and verified drivers traveling along this route will send you direct quotes.
+                        Need a custom ride? Broadcast your trip request and verified drivers traveling along your route will offer you seats or a full car.
                       </p>
                       <button
                         type="button"
                         onClick={handleOpenPostSawariRequest}
                         className="bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs px-5 py-2.5 rounded-full transition shadow-xs cursor-pointer inline-flex items-center gap-1.5"
                       >
-                        <span>📢 Post on Sawari Board</span>
+                        <span>+ Request a Ride</span>
                       </button>
                     </div>
                   ) : (
@@ -2512,6 +2633,9 @@ export default function Home() {
                       const rideBookings = bookings.filter((b) => b.rideId === ride.id);
                       const availableSeats = calculateAvailableSeats(ride, rideBookings);
                       const isFull = availableSeats <= 0;
+                      const depDate = new Date(ride.departureTime);
+                      const timeStr = isNaN(depDate.getTime()) ? '07:00 AM' : depDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+                      const dateStr = isNaN(depDate.getTime()) ? '' : depDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
                       return (
                         <div
@@ -2533,14 +2657,21 @@ export default function Home() {
                             </div>
 
                             <div>
-                              <div className="flex items-center gap-1.5">
-                                <span className="font-extrabold text-xs sm:text-sm text-slate-900">Driver Tariq Khan</span>
-                                <span className="text-[10px] font-black text-amber-900 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">
-                                  ★ 4.9
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-extrabold text-xs sm:text-sm text-slate-900">
+                                  {ride.driverName || 'Verified Captain'}
                                 </span>
+                                <span className="text-[10px] font-black text-amber-900 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">
+                                  ★ {ride.driverTier === 'TOP_RATED_DRIVER' ? '4.9' : '4.8'}
+                                </span>
+                                {ride.originLocationId === userCityId && (
+                                  <span className="text-[10px] font-black text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
+                                    📍 Near You ({oName})
+                                  </span>
+                                )}
                               </div>
                               <span className="text-[10px] sm:text-[11px] text-slate-500 font-medium block">
-                                Toyota Corolla GLi • White
+                                {ride.vehicleMakeModel || 'Standard Car'} {ride.vehicleColor ? `• ${ride.vehicleColor}` : ''}
                               </span>
                             </div>
                           </div>
@@ -2549,11 +2680,15 @@ export default function Home() {
                           <div className="flex-1 space-y-1.5 sm:space-y-2">
                             {/* Schedule Timeline */}
                             <div className="flex items-center gap-1.5 sm:gap-2 text-xs font-bold text-slate-900 flex-wrap">
-                              <span>07:00 AM</span>
+                              <span>{timeStr}</span>
                               <span className="text-slate-500 font-normal">({oName})</span>
                               <span className="text-emerald-600 font-black">➔</span>
-                              <span>11:30 AM</span>
-                              <span className="text-slate-500 font-normal">({dName})</span>
+                              <span>{dName}</span>
+                              {dateStr && (
+                                <span className="text-[10px] text-slate-400 font-medium ml-1">
+                                  • {dateStr}
+                                </span>
+                              )}
                             </div>
 
                             {/* Waypoint Dropoffs */}
@@ -2628,313 +2763,13 @@ export default function Home() {
               </div>
             )}
 
-            {/* VIEW 2: SAWARI BOARD (PASSENGER REVERSE MARKETPLACE) */}
-            {activePassengerNav === 'sawari_board' && (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between flex-wrap gap-2 bg-white p-4 sm:p-5 rounded-2xl border border-slate-200">
-                  <div>
-                    <h2 className="text-sm sm:text-base font-black text-slate-900">Sawari Request Board</h2>
-                    <p className="text-[11px] sm:text-xs text-slate-500">
-                      Cannot find a ride matching your schedule? Broadcast your itinerary and drivers will submit offers.
-                    </p>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleOpenPostSawariRequest}
-                    className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs px-4 py-2 rounded-full transition shadow-xs cursor-pointer flex items-center gap-1.5"
-                  >
-                    <span>+</span>
-                    <span>Post Ride Request</span>
-                  </button>
-                </div>
-
-                {/* Request Cards Feed */}
-                <div className="space-y-3">
-                  {passengerRequests.map((req) => {
-                    const oName = NATIONWIDE_CITIES.find((c) => c.id === req.originLocationId)?.name || 'Origin';
-                    const dName = NATIONWIDE_CITIES.find((c) => c.id === req.destinationLocationId)?.name || 'Destination';
-                    const isOwner = Boolean(
-                      currentUser && (
-                        currentUser.id === req.passengerId ||
-                        req.passengerName.toLowerCase() === currentUser.name.toLowerCase() ||
-                        (req.passengerPhone && currentUser.phone && req.passengerPhone === currentUser.phone)
-                      )
-                    );
-
-                    return (
-                      <div
-                        key={req.id}
-                        className={`bg-white rounded-2xl border p-4 sm:p-5 space-y-3 shadow-2xs transition ${
-                          req.status === 'ACCEPTED' ? 'border-emerald-300 ring-2 ring-emerald-50' : 'border-slate-200'
-                        }`}
-                      >
-                        <div className="flex items-start justify-between">
-                          <div className="flex items-center gap-2.5">
-                            <span className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-slate-100 flex items-center justify-center text-sm sm:text-base">
-                              {req.isFamilyTrip ? '👨‍👩‍👧' : '🧑'}
-                            </span>
-                            <div>
-                              <span className="font-extrabold text-xs sm:text-sm text-slate-900 block">
-                                {oName} ➔ {dName}
-                              </span>
-                              <span className="text-[10px] sm:text-[11px] text-slate-500 font-medium">
-                                Requested by <span className="font-bold text-slate-700">{req.passengerName}</span>
-                              </span>
-                            </div>
-                          </div>
-
-                          <span
-                            className={`text-[9px] sm:text-[10px] font-black px-2 sm:px-2.5 py-0.5 rounded-full uppercase ${
-                              req.status === 'ACCEPTED'
-                                ? 'bg-emerald-100 text-emerald-800'
-                                : 'bg-amber-100 text-amber-800'
-                            }`}
-                          >
-                            {req.status === 'ACCEPTED' ? '✓ Driver Confirmed' : '🟢 Open for Bids'}
-                          </span>
-                        </div>
-
-                        {/* Travel tags */}
-                        <div className="flex flex-wrap items-center gap-1 text-[10px] sm:text-[11px]">
-                          <span className="bg-slate-100 text-slate-700 font-medium px-2 py-0.5 rounded-md">
-                            📅 {req.travelDate} ({req.desiredTime})
-                          </span>
-                          <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold px-2 py-0.5 rounded-md">
-                            {req.bookingType === 'WHOLE_CAR' ? '🚗 Full Car' : `💺 ${req.seatsCount} Seats`}
-                          </span>
-                          {req.isFamilyTrip && (
-                            <span className="bg-purple-50 text-purple-800 border border-purple-200 font-semibold px-2 py-0.5 rounded-md">
-                              👨‍👩‍👧 Family Trip
-                            </span>
-                          )}
-                          {req.acRequired && (
-                            <span className="bg-slate-100 text-slate-700 font-medium px-2 py-0.5 rounded-md">
-                              ❄️ AC Required
-                            </span>
-                          )}
-                        </div>
-
-                        {req.notes && (
-                          <p className="text-xs text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-100 italic">
-                            &quot;{req.notes}&quot;
-                          </p>
-                        )}
-
-                        {/* Budget & Actions Bar */}
-                        <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-                          <div>
-                            <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase block">
-                              Passenger Budget:
-                            </span>
-                            <span className="text-sm sm:text-base font-black text-emerald-800">
-                              Rs. {req.budgetPrice.toLocaleString()}
-                            </span>
-                            <span className="text-[10px] text-slate-400 font-medium ml-1">(Direct Cash)</span>
-                          </div>
-
-                          {/* Action Guard: User cannot accept own listing */}
-                          {isOwner ? (
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs text-slate-500 font-medium">
-                                {req.status === 'ACCEPTED'
-                                  ? '🎉 Driver Deal Closed'
-                                  : req.offers.length === 0
-                                  ? '⏳ Awaiting Driver Offers'
-                                  : `💬 ${req.offers.length} Offer(s)`}
-                              </span>
-                              {req.status === 'OPEN' && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleCancelSawariRequest(req.id)}
-                                  className="text-xs text-rose-600 hover:text-rose-800 font-bold bg-rose-50 px-2.5 py-1 rounded-lg border border-rose-200 cursor-pointer"
-                                >
-                                  Cancel
-                                </button>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-xs font-semibold text-slate-500">
-                              {req.offers.length} Driver Quote(s)
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Confirmed Trip Voucher with Assigned Driver (When Deal is Confirmed) */}
-                        {isOwner && req.status === 'ACCEPTED' && (() => {
-                          const acceptedOffer = req.offers.find((o) => o.id === req.acceptedOfferId) || req.offers[0];
-                          if (!acceptedOffer) return null;
-                          const driverPhone = acceptedOffer.driverPhone || '0300-1234567';
-                          return (
-                            <div className="pt-3 border-t border-emerald-200 space-y-3 bg-emerald-50/90 p-3.5 sm:p-4 rounded-xl border-2 border-emerald-300">
-                              <div className="flex items-center justify-between border-b border-emerald-200/80 pb-2">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-lg">🎫</span>
-                                  <div>
-                                    <h4 className="text-xs sm:text-sm font-black text-emerald-950">
-                                      Deal Confirmed • Driver Assigned
-                                    </h4>
-                                    <span className="text-[10px] text-emerald-700 font-bold block">
-                                      Your driver will pick you up on {req.travelDate} ({req.desiredTime})
-                                    </span>
-                                  </div>
-                                </div>
-                                <span className="bg-emerald-700 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full">
-                                  CONFIRMED
-                                </span>
-                              </div>
-
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 bg-white p-3 rounded-xl border border-emerald-200 text-xs">
-                                <div>
-                                  <span className="text-[9px] uppercase font-bold text-slate-400 block">Driver Details</span>
-                                  <span className="font-black text-slate-900 text-xs sm:text-sm flex items-center gap-1">
-                                    <span>👤</span>
-                                    <span>{acceptedOffer.driverName}</span>
-                                    <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1 rounded font-bold">★ {acceptedOffer.driverRating || 4.9}</span>
-                                  </span>
-                                  <span className="text-[11px] text-slate-600 block mt-0.5 font-mono">
-                                    📞 {driverPhone}
-                                  </span>
-                                </div>
-
-                                <div>
-                                  <span className="text-[9px] uppercase font-bold text-slate-400 block">Vehicle Information</span>
-                                  <span className="font-bold text-slate-900 block">
-                                    🚘 {acceptedOffer.vehicleMakeModel}
-                                  </span>
-                                  <span className="bg-slate-100 border border-slate-300 font-black px-1.5 py-0.2 rounded font-mono text-slate-800 text-[11px] inline-block mt-0.5">
-                                    {acceptedOffer.vehiclePlate || 'Verified Vehicle'}
-                                  </span>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center justify-between bg-emerald-100/70 p-2.5 rounded-xl border border-emerald-200/80 text-xs">
-                                <span className="text-emerald-900 font-bold">Agreed Fare (Direct Cash):</span>
-                                <span className="text-sm font-black text-emerald-950">
-                                  Rs. {acceptedOffer.offeredPrice.toLocaleString()}
-                                </span>
-                              </div>
-
-                              {/* Action Buttons for Passenger to reach Driver */}
-                              <div className="flex flex-col sm:flex-row items-center gap-2 pt-1">
-                                <a
-                                  href={getWhatsAppUrl(
-                                    driverPhone,
-                                    `Assalam-o-Alaikum ${acceptedOffer.driverName} bhai, I am ${currentUser?.name || req.passengerName}. I confirmed your offer of Rs. ${acceptedOffer.offeredPrice.toLocaleString()} for ${oName} to ${dName} on ${req.travelDate} (${req.desiredTime}). Please let me know your pickup plan and arrival time!`
-                                  )}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="w-full sm:flex-1 bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 shadow-2xs"
-                                >
-                                  <span>💬</span>
-                                  <span>WhatsApp Driver</span>
-                                </a>
-
-                                <a
-                                  href={getCallUrl(driverPhone)}
-                                  className="w-full sm:flex-1 bg-slate-900 hover:bg-black text-white font-black text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 shadow-2xs"
-                                >
-                                  <span>📞</span>
-                                  <span>Call Driver</span>
-                                </a>
-
-                                <a
-                                  href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
-                                    `Assalam-o-Alaikum! I am traveling via Apni Sawari.\nRoute: ${oName} to ${dName}\nDriver: ${acceptedOffer.driverName} (${driverPhone})\nCar: ${acceptedOffer.vehicleMakeModel} (${acceptedOffer.vehiclePlate})\nDeparture: ${req.travelDate} (${req.desiredTime})\nFare: Rs. ${acceptedOffer.offeredPrice.toLocaleString()}\nTrack my journey safely!`
-                                  )}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="w-full sm:w-auto bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1 shadow-2xs"
-                                  title="Share complete driver & car details with family for safety"
-                                >
-                                  <span>🛡️</span>
-                                  <span>Share with Family</span>
-                                </a>
-                              </div>
-                            </div>
-                          );
-                        })()}
-
-                        {/* Received Offers Section for Passenger Owner (When status is OPEN) */}
-                        {isOwner && req.status === 'OPEN' && req.offers.length > 0 && (
-                          <div className="pt-2 border-t border-slate-100 space-y-2">
-                            <span className="text-xs font-bold text-slate-700 block">
-                              Incoming Driver Bids ({req.offers.length}):
-                            </span>
-                            <div className="space-y-2">
-                              {req.offers.map((offer) => {
-                                const driverPhone = offer.driverPhone || '0300-1234567';
-                                return (
-                                  <div
-                                    key={offer.id}
-                                    className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs"
-                                  >
-                                    <div className="space-y-1">
-                                      <div className="flex items-center gap-2">
-                                        <span className="font-extrabold text-slate-900">{offer.driverName}</span>
-                                        <span className="text-[10px] bg-amber-100 text-amber-900 font-bold px-1 rounded">
-                                          ★ {offer.driverRating || 4.9}
-                                        </span>
-                                        <span className="text-[10px] text-slate-500 font-medium">
-                                          🚘 {offer.vehicleMakeModel} ({offer.vehiclePlate})
-                                        </span>
-                                      </div>
-                                      {offer.message && (
-                                        <p className="text-[11px] text-slate-600 italic">&quot;{offer.message}&quot;</p>
-                                      )}
-                                      <div className="text-[11px] font-bold text-emerald-800">
-                                        Offered Fare: Rs. {offer.offeredPrice.toLocaleString()}
-                                      </div>
-                                    </div>
-
-                                    <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-end">
-                                      <a
-                                        href={getWhatsAppUrl(
-                                          driverPhone,
-                                          `Assalam-o-Alaikum ${offer.driverName}! I saw your quote of Rs. ${offer.offeredPrice.toLocaleString()} for ${oName} to ${dName} on Apni Sawari. Can we discuss pickup details?`
-                                        )}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold text-xs py-1.5 px-2.5 rounded-lg transition flex items-center gap-1"
-                                      >
-                                        <span>💬</span>
-                                        <span>Chat</span>
-                                      </a>
-                                      <a
-                                        href={getCallUrl(driverPhone)}
-                                        className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs py-1.5 px-2.5 rounded-lg transition flex items-center gap-1"
-                                      >
-                                        <span>📞</span>
-                                        <span>Call</span>
-                                      </a>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleAcceptDriverOffer(req, offer)}
-                                        className="bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-1.5 px-3.5 rounded-lg transition cursor-pointer shadow-xs"
-                                      >
-                                        ✓ Accept Offer
-                                      </button>
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* VIEW 3: MY BOOKINGS (AUTH PROTECTED - ONLY SHOWS FOR LOGGED IN USERS) */}
+            {/* VIEW 2: MY BOOKINGS (AUTH PROTECTED - ONLY SHOWS FOR LOGGED IN USERS) */}
             {activePassengerNav === 'my_bookings' && (
               <div className="space-y-4">
                 <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200">
                   <h2 className="text-sm sm:text-base font-black text-slate-900">My Bookings &amp; Tickets</h2>
                   <p className="text-[11px] sm:text-xs text-slate-500">
-                    Track your reserved seats, boarding terminal points, and direct cash payments due to drivers.
+                    Track your reserved seats, custom ride requests, and direct cash payments due to drivers.
                   </p>
                 </div>
 
@@ -2960,27 +2795,144 @@ export default function Home() {
                       Sign In / Register
                     </button>
                   </div>
-                ) : (myPassengerBookings.length === 0 && myConfirmedSawariRequests.length === 0) ? (
-                  <div className="bg-white p-6 sm:p-8 rounded-2xl sm:rounded-3xl border border-slate-200 text-center space-y-2 shadow-2xs">
+                ) : myPassengerTotalCount === 0 ? (
+                  <div className="bg-white p-6 sm:p-8 rounded-2xl sm:rounded-3xl border border-slate-200 text-center space-y-3 shadow-2xs">
                     <span className="text-3xl block">🎫</span>
                     <h3 className="text-sm font-black text-slate-800">No active bookings yet</h3>
-                    <p className="text-xs text-slate-500">
-                      You haven&apos;t booked any rides. Search for scheduled trips across Pakistan or post on Sawari Board.
+                    <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                      You haven&apos;t booked any rides. Search for scheduled trips across Pakistan or request a custom trip.
                     </p>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setActivePassengerNav('find_ride');
-                        setHasSearched(false);
-                      }}
-                      className="text-xs text-emerald-700 font-black hover:underline cursor-pointer"
-                    >
-                      Find a Ride Now ➔
-                    </button>
+                    <div className="flex items-center justify-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActivePassengerNav('find_ride');
+                          setHasSearched(false);
+                        }}
+                        className="bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs px-5 py-2.5 rounded-full transition shadow-xs cursor-pointer"
+                      >
+                        Find a Ride ➔
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleOpenPostSawariRequest}
+                        className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs px-4 py-2.5 rounded-full transition cursor-pointer"
+                      >
+                        + Request Custom Trip
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {/* Confirmed Custom Sawari Board Trips */}
+                    {/* 1. Pending Custom Sawari Requests & Driver Bids */}
+                    {myOpenSawariRequests.map((req) => {
+                      const oName = req.originName || NATIONWIDE_CITIES.find((c) => c.id === req.originLocationId)?.name || 'Origin';
+                      const dName = req.destinationName || NATIONWIDE_CITIES.find((c) => c.id === req.destinationLocationId)?.name || 'Destination';
+
+                      return (
+                        <div
+                          key={req.id}
+                          className="bg-white p-4 sm:p-5 rounded-2xl border border-amber-300 ring-2 ring-amber-50 shadow-2xs space-y-3"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs sm:text-sm font-black text-slate-900 block">
+                                  {oName} ➔ {dName}
+                                </span>
+                                <span className="text-[9px] bg-amber-100 text-amber-900 font-black px-1.5 py-0.2 rounded uppercase">
+                                  Awaiting Quotes
+                                </span>
+                              </div>
+                              <span className="text-[11px] sm:text-xs text-slate-500 font-medium">
+                                📅 {req.travelDate} ({req.desiredTime}) • {req.bookingType === 'WHOLE_CAR' ? '🚗 Full Car' : `💺 ${req.seatsCount} Seats`} • Budget: Rs. {req.budgetPrice.toLocaleString()}
+                              </span>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleCancelSawariRequest(req.id)}
+                              className="text-xs text-rose-600 hover:text-rose-800 font-bold bg-rose-50 px-2.5 py-1 rounded-lg border border-rose-200 cursor-pointer"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+
+                          {/* Incoming Driver Bids */}
+                          {req.offers.length === 0 ? (
+                            <div className="bg-amber-50/70 p-3 rounded-xl border border-amber-200 text-xs text-amber-900 flex items-center justify-between">
+                              <span>⏳ Request is active. Drivers traveling on this route are reviewing your trip.</span>
+                            </div>
+                          ) : (
+                            <div className="space-y-2 pt-2 border-t border-slate-100">
+                              <span className="text-xs font-bold text-slate-700 block">
+                                Incoming Driver Bids ({req.offers.length}):
+                              </span>
+                              <div className="space-y-2">
+                                {req.offers.map((offer) => {
+                                  const driverPhone = offer.driverPhone || '0300-1234567';
+                                  return (
+                                    <div
+                                      key={offer.id}
+                                      className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs"
+                                    >
+                                      <div className="space-y-1">
+                                        <div className="flex items-center gap-2">
+                                          <span className="font-extrabold text-slate-900">{offer.driverName}</span>
+                                          <span className="text-[10px] bg-amber-100 text-amber-900 font-bold px-1 rounded">
+                                            ★ {offer.driverRating || 4.9}
+                                          </span>
+                                          <span className="text-[10px] text-slate-500 font-medium">
+                                            🚘 {offer.vehicleMakeModel} ({offer.vehiclePlate})
+                                          </span>
+                                        </div>
+                                        {offer.message && (
+                                          <p className="text-[11px] text-slate-600 italic">&quot;{offer.message}&quot;</p>
+                                        )}
+                                        <div className="text-[11px] font-bold text-emerald-800">
+                                          Offered Fare: Rs. {offer.offeredPrice.toLocaleString()}
+                                        </div>
+                                      </div>
+
+                                      <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-end">
+                                        <a
+                                          href={getWhatsAppUrl(
+                                            driverPhone,
+                                            `Assalam-o-Alaikum ${offer.driverName}! I saw your quote of Rs. ${offer.offeredPrice.toLocaleString()} for ${oName} to ${dName} on Apni Sawari. Can we discuss pickup details?`
+                                          )}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold text-xs py-1.5 px-2.5 rounded-lg transition flex items-center gap-1"
+                                        >
+                                          <span>💬</span>
+                                          <span>WhatsApp</span>
+                                        </a>
+                                        <a
+                                          href={getCallUrl(driverPhone)}
+                                          className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs py-1.5 px-2.5 rounded-lg transition flex items-center gap-1"
+                                        >
+                                          <span>📞</span>
+                                          <span>Call</span>
+                                        </a>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleAcceptDriverOffer(req, offer)}
+                                          className="bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-1.5 px-3.5 rounded-lg transition cursor-pointer shadow-xs"
+                                        >
+                                          ✓ Accept Offer
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {/* 2. Confirmed Custom Sawari Board Trips */}
                     {myConfirmedSawariRequests.map((req) => {
                       const acceptedOffer = req.offers.find((o) => o.id === req.acceptedOfferId) || req.offers[0];
                       if (!acceptedOffer) return null;
@@ -3971,93 +3923,146 @@ export default function Home() {
       {/* 3. MOBILE BOTTOM NAVIGATION BAR (md:hidden)                               */}
       {/* ========================================================================= */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 py-1.5 px-2 flex items-center justify-around text-center shadow-lg">
-        <button
-          type="button"
-          onClick={() => {
-            if (portalMode === 'DRIVER') changePortalMode('PASSENGER');
-            setActivePassengerNav('find_ride');
-          }}
-          className={`flex flex-col items-center justify-center p-1 rounded-xl transition cursor-pointer ${
-            portalMode === 'PASSENGER' && activePassengerNav === 'find_ride' ? 'text-emerald-800 font-black' : 'text-slate-500'
-          }`}
-        >
-          <span className="text-base">🔍</span>
-          <span className="text-[10px] mt-0.5">Find Ride</span>
-        </button>
+        {portalMode === 'PASSENGER' ? (
+          /* PASSENGER MOBILE BOTTOM NAV (CLEAN: NO SAWARI BOARD, NO OFFER A RIDE) */
+          <>
+            <button
+              type="button"
+              onClick={() => setActivePassengerNav('find_ride')}
+              className={`flex flex-col items-center justify-center p-1 rounded-xl transition cursor-pointer ${
+                activePassengerNav === 'find_ride' ? 'text-emerald-800 font-black' : 'text-slate-500'
+              }`}
+            >
+              <span className="text-base">🔍</span>
+              <span className="text-[10px] mt-0.5">Find Rides</span>
+            </button>
 
-        <button
-          type="button"
-          onClick={() => {
-            if (portalMode === 'DRIVER') changePortalMode('PASSENGER');
-            setActivePassengerNav('sawari_board');
-          }}
-          className={`flex flex-col items-center justify-center p-1 rounded-xl transition cursor-pointer relative ${
-            portalMode === 'PASSENGER' && activePassengerNav === 'sawari_board' ? 'text-emerald-800 font-black' : 'text-slate-500'
-          }`}
-        >
-          <span className="text-base">📢</span>
-          <span className="text-[10px] mt-0.5">Board</span>
-          {openSawariRequestsCount > 0 && (
-            <span className="absolute top-0 right-1 w-3.5 h-3.5 bg-emerald-600 text-white rounded-full text-[9px] flex items-center justify-center font-bold">
-              {openSawariRequestsCount}
-            </span>
-          )}
-        </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!currentUser) {
+                  setAuthTab('SIGNIN');
+                  setShowAuthModal(true);
+                } else {
+                  setActivePassengerNav('my_bookings');
+                }
+              }}
+              className={`flex flex-col items-center justify-center p-1 rounded-xl transition cursor-pointer relative ${
+                activePassengerNav === 'my_bookings' ? 'text-emerald-800 font-black' : 'text-slate-500'
+              }`}
+            >
+              <span className="text-base">🎟️</span>
+              <span className="text-[10px] mt-0.5">Bookings</span>
+              {myPassengerTotalCount > 0 && (
+                <span className="absolute top-0 right-1 w-3.5 h-3.5 bg-emerald-700 text-white rounded-full text-[9px] flex items-center justify-center font-bold">
+                  {myPassengerTotalCount}
+                </span>
+              )}
+            </button>
 
-        <button
-          type="button"
-          onClick={handleOpenOfferRide}
-          className="flex flex-col items-center justify-center p-1 rounded-xl transition cursor-pointer text-emerald-700 font-bold"
-        >
-          <span className="w-8 h-8 rounded-full bg-emerald-700 text-white flex items-center justify-center text-sm font-black shadow-xs">
-            +
-          </span>
-          <span className="text-[10px] mt-0.5 text-slate-800 font-bold">Offer</span>
-        </button>
+            <button
+              type="button"
+              onClick={() => setActivePassengerNav('how_it_works')}
+              className={`flex flex-col items-center justify-center p-1 rounded-xl transition cursor-pointer ${
+                activePassengerNav === 'how_it_works' ? 'text-emerald-800 font-black' : 'text-slate-500'
+              }`}
+            >
+              <span className="text-base">ℹ️</span>
+              <span className="text-[10px] mt-0.5">Guide</span>
+            </button>
 
-        <button
-          type="button"
-          onClick={() => {
-            if (!currentUser) {
-              setAuthTab('SIGNIN');
-              setShowAuthModal(true);
-            } else if (portalMode === 'DRIVER') {
-              setActiveDriverNav('driver_trips');
-            } else {
-              setActivePassengerNav('my_bookings');
-            }
-          }}
-          className={`flex flex-col items-center justify-center p-1 rounded-xl transition cursor-pointer relative ${
-            (portalMode === 'PASSENGER' && activePassengerNav === 'my_bookings') || (portalMode === 'DRIVER' && activeDriverNav === 'driver_trips')
-              ? 'text-emerald-800 font-black'
-              : 'text-slate-500'
-          }`}
-        >
-          <span className="text-base">{portalMode === 'DRIVER' ? '📋' : '🎟️'}</span>
-          <span className="text-[10px] mt-0.5">{portalMode === 'DRIVER' ? 'My Trips' : 'Bookings'}</span>
-          {(myPassengerBookings.length + myConfirmedSawariRequests.length) > 0 && (
-            <span className="absolute top-0 right-1 w-3.5 h-3.5 bg-emerald-700 text-white rounded-full text-[9px] flex items-center justify-center font-bold">
-              {myPassengerBookings.length + myConfirmedSawariRequests.length}
-            </span>
-          )}
-        </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (currentUser) {
+                  setShowProfileModal(true);
+                } else {
+                  setAuthTab('SIGNIN');
+                  setAuthError(null);
+                  setShowAuthModal(true);
+                }
+              }}
+              className="flex flex-col items-center justify-center p-1 rounded-xl transition cursor-pointer text-slate-500"
+            >
+              <span className="text-base">{currentUser ? (currentUser.avatarUrl || '🧑') : '👤'}</span>
+              <span className="text-[10px] mt-0.5">{currentUser ? 'Profile' : 'Sign In'}</span>
+            </button>
+          </>
+        ) : (
+          /* DRIVER MOBILE BOTTOM NAV */
+          <>
+            <button
+              type="button"
+              onClick={() => setActiveDriverNav('driver_trips')}
+              className={`flex flex-col items-center justify-center p-1 rounded-xl transition cursor-pointer relative ${
+                activeDriverNav === 'driver_trips' ? 'text-emerald-800 font-black' : 'text-slate-500'
+              }`}
+            >
+              <span className="text-base">📋</span>
+              <span className="text-[10px] mt-0.5">My Trips</span>
+              {driverPendingBookings.length > 0 && (
+                <span className="absolute top-0 right-1 w-3.5 h-3.5 bg-amber-500 text-white rounded-full text-[9px] flex items-center justify-center font-bold">
+                  {driverPendingBookings.length}
+                </span>
+              )}
+            </button>
 
-        <button
-          type="button"
-          onClick={() => {
-            if (currentUser) {
-              setShowProfileModal(true);
-            } else {
-              setAuthTab('SIGNIN');
-              setAuthError(null);
-              setShowAuthModal(true);
-            }
-          }}
-          className="flex flex-col items-center justify-center p-1 rounded-xl transition cursor-pointer text-slate-500"
-        >
-          <span className="text-base">{currentUser ? (currentUser.avatarUrl || '🧑') : '👤'}</span>
-          <span className="text-[10px] mt-0.5">{currentUser ? 'Profile' : 'Sign In'}</span>
-        </button>
+            <button
+              type="button"
+              onClick={() => setActiveDriverNav('driver_leads')}
+              className={`flex flex-col items-center justify-center p-1 rounded-xl transition cursor-pointer relative ${
+                activeDriverNav === 'driver_leads' ? 'text-emerald-800 font-black' : 'text-slate-500'
+              }`}
+            >
+              <span className="text-base">📢</span>
+              <span className="text-[10px] mt-0.5">Leads</span>
+              {openSawariRequestsCount > 0 && (
+                <span className="absolute top-0 right-1 w-3.5 h-3.5 bg-emerald-600 text-white rounded-full text-[9px] flex items-center justify-center font-bold">
+                  {openSawariRequestsCount}
+                </span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleOpenOfferRide}
+              className="flex flex-col items-center justify-center p-1 rounded-xl transition cursor-pointer text-emerald-700 font-bold"
+            >
+              <span className="w-8 h-8 rounded-full bg-emerald-700 text-white flex items-center justify-center text-sm font-black shadow-xs">
+                +
+              </span>
+              <span className="text-[10px] mt-0.5 text-slate-800 font-bold">Offer</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveDriverNav('driver_vehicle')}
+              className={`flex flex-col items-center justify-center p-1 rounded-xl transition cursor-pointer ${
+                activeDriverNav === 'driver_vehicle' ? 'text-emerald-800 font-black' : 'text-slate-500'
+              }`}
+            >
+              <span className="text-base">🚙</span>
+              <span className="text-[10px] mt-0.5">Vehicle</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (currentUser) {
+                  setShowProfileModal(true);
+                } else {
+                  setAuthTab('SIGNIN');
+                  setAuthError(null);
+                  setShowAuthModal(true);
+                }
+              }}
+              className="flex flex-col items-center justify-center p-1 rounded-xl transition cursor-pointer text-slate-500"
+            >
+              <span className="text-base">{currentUser ? (currentUser.avatarUrl || '🧑') : '👤'}</span>
+              <span className="text-[10px] mt-0.5">{currentUser ? 'Profile' : 'Sign In'}</span>
+            </button>
+          </>
+        )}
       </div>
 
       {/* ========================================================================= */}
