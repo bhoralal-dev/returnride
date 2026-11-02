@@ -76,7 +76,12 @@ const INITIAL_RIDES: Ride[] = [
   {
     id: 'ride-101',
     driverId: 'driver-tariq',
+    driverName: 'Driver Tariq Khan',
+    driverPhone: '0300-9876543',
     vehicleId: 'veh-corolla',
+    vehicleMakeModel: 'Toyota Corolla GLi',
+    vehiclePlate: 'LEB-4592',
+    vehicleColor: 'White',
     originLocationId: 'loc-uk',
     destinationLocationId: 'loc-khi',
     departureTime: '2026-11-02T07:00:00Z',
@@ -112,7 +117,12 @@ const INITIAL_RIDES: Ride[] = [
   {
     id: 'ride-102',
     driverId: 'driver-aslam',
+    driverName: 'Aslam Pervez',
+    driverPhone: '0301-2345678',
     vehicleId: 'veh-city',
+    vehicleMakeModel: 'Honda City Aspire',
+    vehiclePlate: 'KHI-8201',
+    vehicleColor: 'Silver',
     originLocationId: 'loc-khi',
     destinationLocationId: 'loc-hyd',
     departureTime: '2026-11-02T16:30:00Z',
@@ -144,7 +154,12 @@ const INITIAL_RIDES: Ride[] = [
   {
     id: 'ride-103',
     driverId: 'driver-imran',
+    driverName: 'Kamran Shah',
+    driverPhone: '0333-8765432',
     vehicleId: 'veh-yaris',
+    vehicleMakeModel: 'Toyota Yaris ATIV',
+    vehiclePlate: 'ICT-4421',
+    vehicleColor: 'Grey',
     originLocationId: 'loc-lhr',
     destinationLocationId: 'loc-isb',
     departureTime: '2026-11-03T06:00:00Z',
@@ -177,7 +192,12 @@ const INITIAL_RIDES: Ride[] = [
   {
     id: 'ride-104',
     driverId: 'driver-shahid',
+    driverName: 'Shahid Mehmood',
+    driverPhone: '0304-9988776',
     vehicleId: 'veh-brv',
+    vehicleMakeModel: 'Honda BR-V',
+    vehiclePlate: 'MN-7712',
+    vehicleColor: 'Silver',
     originLocationId: 'loc-mul',
     destinationLocationId: 'loc-lhr',
     departureTime: '2026-11-03T09:00:00Z',
@@ -270,6 +290,10 @@ const INITIAL_BOOKINGS: BookingRequest[] = [
     id: 'req-zubair-1',
     rideId: 'ride-101',
     passengerId: 'Zubair Ahmed (#9182)',
+    passengerName: 'Zubair Ahmed',
+    passengerPhone: '0321-4567890',
+    pickupAddress: 'Umerkot Main Bus Stop, Near City Hospital',
+    specialNotes: 'Traveling with 1 medium bag. Will wait near main entrance.',
     bookingType: 'SEAT',
     requestedSeats: 2,
     totalPrice: 7000,
@@ -350,6 +374,10 @@ export default function Home() {
   const [bookingIsRoundTrip, setBookingIsRoundTrip] = useState<boolean>(false);
   const [bookingRoundTripType, setBookingRoundTripType] = useState<'SAME_DAY_WAIT' | 'MULTI_DAY'>('SAME_DAY_WAIT');
   const [bookingReturnDate, setBookingReturnDate] = useState<string>('2026-11-03');
+  const [bookingPassengerName, setBookingPassengerName] = useState<string>('');
+  const [bookingPassengerPhone, setBookingPassengerPhone] = useState<string>('');
+  const [bookingPickupAddress, setBookingPickupAddress] = useState<string>('');
+  const [bookingSpecialNotes, setBookingSpecialNotes] = useState<string>('');
 
   // Offer a Ride Modal (For publishing a trip)
   const [showOfferRideModal, setShowOfferRideModal] = useState(false);
@@ -518,6 +546,15 @@ export default function Home() {
     }
   };
 
+  const changePortalMode = (mode: 'PASSENGER' | 'DRIVER') => {
+    setPortalMode(mode);
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.setItem('apnisawari_tab_portal_mode', mode);
+      } catch {}
+    }
+  };
+
   // Check Supabase session on client load, restore local state, and listen to cross-tab updates
   useEffect(() => {
     setIsClientLoaded(true);
@@ -525,15 +562,25 @@ export default function Home() {
     // 1. Instant local restoration so page reload NEVER flickers or asks to sign in again
     if (typeof window !== 'undefined') {
       try {
+        const savedTabMode = sessionStorage.getItem('apnisawari_tab_portal_mode') as 'PASSENGER' | 'DRIVER' | null;
         const savedUserStr = localStorage.getItem('apnisawari_current_user_v1');
         if (savedUserStr) {
           const savedUser = JSON.parse(savedUserStr);
           if (savedUser && savedUser.id) {
             setCurrentUser(savedUser);
-            if (savedUser.role === 'DRIVER') {
+            // Tab isolation: tab's own sessionStorage keeps its view independent from other tabs
+            if (savedTabMode) {
+              setPortalMode(savedTabMode);
+            } else if (savedUser.role === 'DRIVER') {
               setPortalMode('DRIVER');
+              sessionStorage.setItem('apnisawari_tab_portal_mode', 'DRIVER');
+            } else {
+              setPortalMode('PASSENGER');
+              sessionStorage.setItem('apnisawari_tab_portal_mode', 'PASSENGER');
             }
           }
+        } else if (savedTabMode) {
+          setPortalMode(savedTabMode);
         }
 
         const savedRidesStr = localStorage.getItem('apnisawari_rides_v1');
@@ -610,8 +657,9 @@ export default function Home() {
         if (session?.user) {
           const profile = mapSupabaseUserToProfile(session.user);
           saveCurrentUser(profile);
-          if (profile.role === 'DRIVER') {
-            setPortalMode('DRIVER');
+          const savedTabMode = typeof window !== 'undefined' ? sessionStorage.getItem('apnisawari_tab_portal_mode') : null;
+          if (!savedTabMode && profile.role === 'DRIVER') {
+            changePortalMode('DRIVER');
           }
         }
       });
@@ -727,7 +775,9 @@ export default function Home() {
     return bookings.filter((b) => {
       return (
         b.passengerId.includes(currentUser.name) ||
-        b.passengerId.includes(currentUser.id)
+        b.passengerId.includes(currentUser.id) ||
+        (b.passengerPhone && currentUser.phone && b.passengerPhone === currentUser.phone) ||
+        (b.passengerName && currentUser.name && b.passengerName.toLowerCase() === currentUser.name.toLowerCase())
       );
     });
   }, [bookings, currentUser]);
@@ -763,7 +813,7 @@ export default function Home() {
       return;
     }
 
-    setPortalMode('DRIVER');
+    changePortalMode('DRIVER');
     setActiveDriverNav('driver_trips');
     setNotification({
       type: 'info',
@@ -774,7 +824,7 @@ export default function Home() {
 
   // Switch to Passenger View handler
   const handleSwitchToPassengerView = () => {
-    setPortalMode('PASSENGER');
+    changePortalMode('PASSENGER');
     setActivePassengerNav('find_ride');
     setNotification({
       type: 'info',
@@ -919,10 +969,15 @@ export default function Home() {
     const newRide: Ride = {
       id: generateClientUniqueId('ride'),
       driverId: currentUser.id,
+      driverName: currentUser.name,
+      driverPhone: currentUser.phone,
       vehicleId: generateClientUniqueId('veh'),
+      vehicleMakeModel: currentUser.vehicle.makeModel,
+      vehiclePlate: currentUser.vehicle.plate,
+      vehicleColor: currentUser.vehicle.color || 'White',
       originLocationId: postOrigin,
       destinationLocationId: postDest,
-      departureTime: `${postDate}T07:00:00Z`,
+      departureTime: `${postDate}T${postTime || '07:00'}:00Z`,
       bookingMode: postMode,
       capacity: currentUser.vehicle.capacity || 4,
       bookedSeatsCount: 0,
@@ -951,7 +1006,7 @@ export default function Home() {
     const updatedRides = [newRide, ...rides.filter((r) => r.id !== newRide.id)];
     saveRides(updatedRides, 'PUBLISH', newRide);
     setShowOfferRideModal(false);
-    setPortalMode('DRIVER');
+    changePortalMode('DRIVER');
     setActiveDriverNav('driver_trips');
 
     if (typeof window !== 'undefined') {
@@ -1002,12 +1057,43 @@ export default function Home() {
     setBookingSeatsCount(1);
     setBookingSelectedDropoff('DEFAULT');
     setBookingIsRoundTrip(false);
+    setBookingPassengerName(currentUser.name || '');
+    setBookingPassengerPhone(currentUser.phone || '');
+    setBookingPickupAddress('');
+    setBookingSpecialNotes('');
     setShowBookingModal(true);
   };
 
   // Confirm Passenger Booking
   const handleConfirmBooking = () => {
     if (!currentUser || !selectedRideForBooking) return;
+
+    if (!bookingPassengerName.trim()) {
+      setNotification({
+        type: 'error',
+        title: 'Passenger Name Required',
+        message: 'Please provide your full name for the booking ticket.',
+      });
+      return;
+    }
+
+    if (!bookingPickupAddress.trim()) {
+      setNotification({
+        type: 'error',
+        title: 'Pickup Location Required',
+        message: 'Please provide your exact pickup landmark or address (e.g. Near Shell Pump, Sohrab Goth) so the driver knows where to pick you up.',
+      });
+      return;
+    }
+
+    if (!bookingPassengerPhone.trim()) {
+      setNotification({
+        type: 'error',
+        title: 'Phone Number Required',
+        message: 'Please provide a valid Pakistani mobile number for driver coordination via WhatsApp / Call.',
+      });
+      return;
+    }
 
     try {
       const seatsToBook = bookingModeChoice === 'WHOLE_CAR' ? 1 : bookingSeatsCount;
@@ -1038,7 +1124,11 @@ export default function Home() {
       const newBooking = createBookingRequest({
         id: generateClientUniqueId('req'),
         ride: selectedRideForBooking,
-        passengerId: `${currentUser.name} (#${currentUser.id.slice(0, 6)})`,
+        passengerId: `${bookingPassengerName.trim()} (#${currentUser.id.slice(0, 6)})`,
+        passengerName: bookingPassengerName.trim(),
+        passengerPhone: bookingPassengerPhone.trim(),
+        pickupAddress: bookingPickupAddress.trim(),
+        specialNotes: bookingSpecialNotes.trim(),
         bookingType: bookingModeChoice,
         requestedSeats: seatsToBook,
         totalPrice: calculatedPrice,
@@ -1052,7 +1142,7 @@ export default function Home() {
       const updatedBookings = [newBooking, ...bookings];
       saveBookings(updatedBookings);
       setShowBookingModal(false);
-      setPortalMode('PASSENGER');
+      changePortalMode('PASSENGER');
       setActivePassengerNav('my_bookings');
       setNotification({
         type: 'success',
@@ -1798,7 +1888,7 @@ export default function Home() {
           });
 
           if (profile.role === 'DRIVER') {
-            setPortalMode('DRIVER');
+            changePortalMode('DRIVER');
             setActiveDriverNav('driver_trips');
           } else if (selectedRideForBooking) {
             setShowBookingModal(true);
@@ -1833,7 +1923,7 @@ export default function Home() {
       });
 
       if (authRole === 'DRIVER') {
-        setPortalMode('DRIVER');
+        changePortalMode('DRIVER');
         setActiveDriverNav('driver_trips');
       } else if (selectedRideForBooking) {
         setShowBookingModal(true);
@@ -1857,7 +1947,7 @@ export default function Home() {
     }
     saveCurrentUser(null);
     setShowProfileModal(false);
-    setPortalMode('PASSENGER');
+    changePortalMode('PASSENGER');
     setActivePassengerNav('find_ride');
     setNotification({
       type: 'info',
@@ -2711,7 +2801,11 @@ export default function Home() {
                   </p>
                 </div>
 
-                {!currentUser ? (
+                {!isClientLoaded ? (
+                  <div className="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 text-center text-xs text-slate-400">
+                    Loading your bookings...
+                  </div>
+                ) : !currentUser ? (
                   <div className="bg-white p-6 sm:p-8 rounded-2xl sm:rounded-3xl border border-slate-200 text-center space-y-3 shadow-2xs">
                     <span className="text-3xl block">🔒</span>
                     <h3 className="text-sm sm:text-base font-black text-slate-800">Sign in to view your bookings</h3>
@@ -2748,11 +2842,16 @@ export default function Home() {
                     </button>
                   </div>
                 ) : (
-                  <div className="space-y-3">
+                  <div className="space-y-4">
                     {myPassengerBookings.map((b) => {
                       const targetRide = rides.find((r) => r.id === b.rideId);
                       const oName = targetRide ? NATIONWIDE_CITIES.find((c) => c.id === targetRide.originLocationId)?.name : 'Origin';
                       const dName = targetRide ? NATIONWIDE_CITIES.find((c) => c.id === targetRide.destinationLocationId)?.name : 'Destination';
+                      const driverDisplayName = targetRide?.driverName || 'Verified Apni Sawari Driver';
+                      const driverPhone = targetRide?.driverPhone || '0300-9876543';
+                      const vehicleModel = targetRide?.vehicleMakeModel || 'Toyota Corolla GLi';
+                      const vehiclePlate = targetRide?.vehiclePlate || 'LEB-4592';
+                      const vehicleColor = targetRide?.vehicleColor || 'White';
 
                       return (
                         <div
@@ -2792,7 +2891,7 @@ export default function Home() {
                             </span>
                           </div>
 
-                          <div className="text-xs text-slate-600 flex justify-between items-center bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                          <div className="text-xs text-slate-600 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-1.5 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                             <div>
                               <span className="text-slate-400 block text-[10px] uppercase font-bold">Fare Due:</span>
                               <span className="font-extrabold text-xs sm:text-sm text-emerald-900">
@@ -2801,17 +2900,119 @@ export default function Home() {
                             </div>
                             {b.dropoffStopName && (
                               <span className="text-[10px] sm:text-[11px] font-bold text-slate-700">
-                                📍 Dropoff: {b.dropoffStopName}
+                                📍 Dropoff Stop: {b.dropoffStopName}
                               </span>
                             )}
                           </div>
 
+                          {/* Pickup landmark details */}
+                          {b.pickupAddress && (
+                            <div className="bg-amber-50/70 p-2.5 rounded-xl border border-amber-200/80 text-xs flex items-start gap-1.5">
+                              <span className="text-sm">📍</span>
+                              <div>
+                                <span className="text-[10px] font-black uppercase text-amber-800 block">
+                                  Your Pickup Landmark / Doorstep
+                                </span>
+                                <span className="font-bold text-slate-900 text-xs">
+                                  {b.pickupAddress}
+                                </span>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Confirmed Ride Ticket Voucher with Direct WhatsApp, Call, & Family Safety Sharing */}
                           {b.status === 'ACCEPTED' && (
-                            <div className="bg-emerald-50 text-emerald-950 p-3 rounded-xl border border-emerald-200 text-xs space-y-0.5">
-                              <span className="font-bold block">🛡️ Verified Carpool Safety Check</span>
-                              <p className="text-[11px] text-emerald-800">
-                                Show your verification code to the driver upon boarding. Pay exact cash of Rs. {b.totalPrice.toLocaleString()}.
-                              </p>
+                            <div className="bg-emerald-50 text-emerald-950 p-3.5 sm:p-4 rounded-2xl border-2 border-emerald-300 space-y-3">
+                              <div className="flex items-center justify-between border-b border-emerald-200/80 pb-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-lg">🎫</span>
+                                  <div>
+                                    <h4 className="text-xs sm:text-sm font-black text-emerald-950">
+                                      Confirmed Carpool Boarding Voucher
+                                    </h4>
+                                    <span className="text-[10px] text-emerald-700 font-bold block">
+                                      Show this voucher upon vehicle arrival
+                                    </span>
+                                  </div>
+                                </div>
+                                <span className="bg-emerald-700 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full">
+                                  SEAT CONFIRMED
+                                </span>
+                              </div>
+
+                              {/* Driver & Car Details Grid */}
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 bg-white p-3 rounded-xl border border-emerald-200 text-xs">
+                                <div>
+                                  <span className="text-[9px] uppercase font-bold text-slate-400 block">Assigned Driver</span>
+                                  <span className="font-black text-slate-900 text-xs sm:text-sm flex items-center gap-1">
+                                    <span>👤</span>
+                                    <span>{driverDisplayName}</span>
+                                    <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1 rounded font-bold">✓ Verified</span>
+                                  </span>
+                                  <span className="text-[11px] text-slate-600 block mt-0.5 font-mono">
+                                    📞 {driverPhone}
+                                  </span>
+                                </div>
+
+                                <div>
+                                  <span className="text-[9px] uppercase font-bold text-slate-400 block">Vehicle Specifications</span>
+                                  <div className="space-y-0.5">
+                                    <span className="font-bold text-slate-900 block">
+                                      🚘 {vehicleModel}
+                                    </span>
+                                    <div className="flex items-center gap-2 text-[11px]">
+                                      <span className="bg-slate-100 border border-slate-300 font-black px-1.5 py-0.2 rounded font-mono text-slate-800">
+                                        {vehiclePlate}
+                                      </span>
+                                      <span className="text-slate-600">
+                                        Color: {vehicleColor}
+                                      </span>
+                                      {targetRide?.travelComfort?.acType && (
+                                        <span className="text-emerald-700 font-bold">
+                                          ❄️ AC
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Direct Coordination Action Buttons */}
+                              <div className="flex flex-col sm:flex-row items-center gap-2 pt-1">
+                                <a
+                                  href={getWhatsAppUrl(
+                                    driverPhone,
+                                    `Assalam-o-Alaikum ${driverDisplayName} bhai, I am ${currentUser?.name || 'Passenger'}. My Apni Sawari booking for ${oName} to ${dName} is confirmed. My pickup spot is: "${b.pickupAddress || 'as agreed'}". Please let me know your arrival time!`
+                                  )}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="w-full sm:flex-1 bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 shadow-2xs"
+                                >
+                                  <span>💬</span>
+                                  <span>WhatsApp Driver</span>
+                                </a>
+
+                                <a
+                                  href={getCallUrl(driverPhone)}
+                                  className="w-full sm:flex-1 bg-slate-900 hover:bg-black text-white font-black text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 shadow-2xs"
+                                >
+                                  <span>📞</span>
+                                  <span>Call Driver</span>
+                                </a>
+
+                                <a
+                                  href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
+                                    `Assalam-o-Alaikum! I am traveling via Apni Sawari Carpool.\nRoute: ${oName} to ${dName}\nDriver: ${driverDisplayName} (${driverPhone})\nCar: ${vehicleModel} (${vehiclePlate}, Color: ${vehicleColor})\nPickup: ${b.pickupAddress || 'Doorstep'}\nFare: Rs. ${b.totalPrice.toLocaleString()}\nTrack my journey safely!`
+                                  )}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="w-full sm:w-auto bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1 shadow-2xs"
+                                  title="Share complete driver & car details with family for safety"
+                                >
+                                  <span>🛡️</span>
+                                  <span>Share with Family</span>
+                                </a>
+                              </div>
                             </div>
                           )}
 
@@ -3018,22 +3219,38 @@ export default function Home() {
                     {driverPendingBookings.map((req) => (
                       <div
                         key={req.id}
-                        className="bg-white p-3.5 sm:p-4 rounded-xl border border-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs"
+                        className="bg-white p-3.5 sm:p-4 rounded-xl border border-amber-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-2xs"
                       >
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <span className="font-extrabold text-xs sm:text-sm text-slate-900">{req.passengerId}</span>
+                        <div className="space-y-1.5 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-extrabold text-xs sm:text-sm text-slate-900">{req.passengerName || req.passengerId}</span>
                             <span className="text-[10px] font-black bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded">
                               {req.bookingType === 'WHOLE_CAR' ? 'Entire Car' : `${req.requestedSeats} Seat(s)`}
                             </span>
+                            {req.passengerPhone && (
+                              <span className="text-[10px] text-slate-500 font-mono">
+                                📞 {req.passengerPhone}
+                              </span>
+                            )}
                           </div>
-                          <p className="text-xs text-slate-600">
-                            Dropoff: <span className="font-bold">{req.dropoffStopName || 'Destination'}</span> • Cash due upon boarding:{' '}
-                            <span className="font-black text-emerald-800">Rs. {req.totalPrice.toLocaleString()}</span>
-                          </p>
+
+                          <div className="bg-amber-50/60 p-2 rounded-lg border border-amber-200/60 text-xs space-y-0.5">
+                            <p className="text-slate-800 font-bold">
+                              📍 Pickup: <span className="text-emerald-900 font-black">{req.pickupAddress || 'Address will be confirmed upon call'}</span>
+                            </p>
+                            <p className="text-slate-600 text-[11px]">
+                              🏁 Dropoff: <span className="font-bold">{req.dropoffStopName || 'Final Destination'}</span> • Cash Due:{' '}
+                              <span className="font-black text-emerald-800">Rs. {req.totalPrice.toLocaleString()}</span>
+                            </p>
+                            {req.specialNotes && (
+                              <p className="text-slate-500 text-[10px] italic">
+                                💬 Note: &quot;{req.specialNotes}&quot;
+                              </p>
+                            )}
+                          </div>
                         </div>
 
-                        <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end">
+                        <div className="flex items-center gap-2 shrink-0 w-full md:w-auto justify-end">
                           <button
                             type="button"
                             onClick={() => handleAcceptBooking(req)}
@@ -3051,6 +3268,111 @@ export default function Home() {
                         </div>
                       </div>
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Confirmed Passengers & Pickup Route Sheet */}
+              {driverConfirmedBookings.length > 0 && (
+                <div className="bg-emerald-50/90 border-2 border-emerald-300 p-4 sm:p-5 rounded-2xl space-y-3 shadow-2xs">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-base sm:text-lg">📋</span>
+                      <h3 className="text-xs sm:text-sm font-black text-emerald-950">
+                        Confirmed Passengers &amp; Pickup Sheet ({driverConfirmedBookings.length})
+                      </h3>
+                    </div>
+                    <span className="text-[10px] sm:text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                      Total Cash: Rs. {driverTotalCashDue.toLocaleString()}
+                    </span>
+                  </div>
+                  <p className="text-xs text-emerald-800">
+                    Coordinate directly with your passengers via WhatsApp or Call for doorstep pickup and exact timing.
+                  </p>
+
+                  <div className="space-y-3">
+                    {driverConfirmedBookings.map((b) => {
+                      const ride = rides.find((r) => r.id === b.rideId);
+                      const originName = ride ? NATIONWIDE_CITIES.find((c) => c.id === ride.originLocationId)?.name : 'Origin';
+                      const destName = ride ? NATIONWIDE_CITIES.find((c) => c.id === ride.destinationLocationId)?.name : 'Destination';
+                      const passengerPhone = b.passengerPhone || '0300-1234567';
+                      const passengerDisplayName = b.passengerName || b.passengerId;
+
+                      const waMsg = `Assalam-o-Alaikum ${passengerDisplayName} bhai, I am your Apni Sawari driver (${currentUser?.name || 'Driver'}). Your ride from ${originName} to ${destName} is confirmed. I have noted your pickup spot: "${b.pickupAddress || 'agreed stop'}". My car is ${currentUser?.vehicle?.makeModel || 'Car'} (${currentUser?.vehicle?.plate || ''}, Color: ${currentUser?.vehicle?.color || 'White'}). Please be ready on time!`;
+
+                      return (
+                        <div
+                          key={b.id}
+                          className="bg-white p-4 rounded-xl border border-emerald-200 shadow-2xs space-y-3"
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-black text-sm text-slate-900">{passengerDisplayName}</span>
+                                <span className="text-[10px] font-black bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                                  {b.bookingType === 'WHOLE_CAR' ? '🚗 Full Car' : `💺 ${b.requestedSeats} Seat(s)`}
+                                </span>
+                              </div>
+                              <span className="text-xs text-slate-500 font-medium">
+                                Trip: {originName} ➔ {destName}
+                              </span>
+                            </div>
+
+                            <div className="text-left sm:text-right">
+                              <span className="text-[10px] text-slate-400 font-bold uppercase block">Cash Due Upon Boarding</span>
+                              <span className="text-sm font-black text-emerald-800">
+                                Rs. {b.totalPrice.toLocaleString()}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Pickup landmark badge */}
+                          <div className="bg-amber-50/70 p-2.5 rounded-xl border border-amber-200 space-y-1">
+                            <div className="flex items-start gap-1.5">
+                              <span className="text-sm">📍</span>
+                              <div>
+                                <span className="text-[10px] font-black uppercase text-amber-800 block tracking-wide">
+                                  Passenger Pickup Landmark / Doorstep
+                                </span>
+                                <span className="text-xs font-bold text-slate-900">
+                                  {b.pickupAddress || 'Call passenger to coordinate pickup point'}
+                                </span>
+                              </div>
+                            </div>
+                            {b.dropoffStopName && (
+                              <p className="text-[11px] text-slate-600 pl-5">
+                                🏁 Dropoff Stop: <span className="font-semibold text-slate-800">{b.dropoffStopName}</span>
+                              </p>
+                            )}
+                            {b.specialNotes && (
+                              <p className="text-[11px] text-slate-600 pl-5 italic">
+                                💬 Luggage / Note: &quot;{b.specialNotes}&quot;
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Instant Communication CTA Buttons */}
+                          <div className="flex flex-wrap items-center gap-2 pt-1">
+                            <a
+                              href={getWhatsAppUrl(passengerPhone, waMsg)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex-1 min-w-[140px] bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs py-2 px-3 rounded-lg transition flex items-center justify-center gap-1.5 shadow-2xs"
+                            >
+                              <span>💬</span>
+                              <span>WhatsApp Passenger</span>
+                            </a>
+                            <a
+                              href={getCallUrl(passengerPhone)}
+                              className="flex-1 min-w-[120px] bg-slate-900 hover:bg-black text-white font-black text-xs py-2 px-3 rounded-lg transition flex items-center justify-center gap-1.5 shadow-2xs"
+                            >
+                              <span>📞</span>
+                              <span>Call {passengerPhone}</span>
+                            </a>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -3300,7 +3622,7 @@ export default function Home() {
         <button
           type="button"
           onClick={() => {
-            if (portalMode === 'DRIVER') setPortalMode('PASSENGER');
+            if (portalMode === 'DRIVER') changePortalMode('PASSENGER');
             setActivePassengerNav('find_ride');
           }}
           className={`flex flex-col items-center justify-center p-1 rounded-xl transition cursor-pointer ${
@@ -3314,7 +3636,7 @@ export default function Home() {
         <button
           type="button"
           onClick={() => {
-            if (portalMode === 'DRIVER') setPortalMode('PASSENGER');
+            if (portalMode === 'DRIVER') changePortalMode('PASSENGER');
             setActivePassengerNav('sawari_board');
           }}
           className={`flex flex-col items-center justify-center p-1 rounded-xl transition cursor-pointer relative ${
@@ -4129,6 +4451,73 @@ export default function Home() {
                 )}
               </div>
             )}
+
+            {/* Passenger Details & Exact Pickup Spot */}
+            <div className="space-y-3 bg-slate-50 p-3 sm:p-4 rounded-2xl border border-slate-200">
+              <span className="text-[10px] uppercase font-black tracking-wider text-slate-500 block">
+                Passenger &amp; Doorstep Coordination
+              </span>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs font-black text-slate-800 mb-1">
+                    👤 Full Name <span className="text-rose-600">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={bookingPassengerName}
+                    onChange={(e) => setBookingPassengerName(e.target.value)}
+                    placeholder="Enter your name"
+                    className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-emerald-600 transition"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-black text-slate-800 mb-1">
+                    📱 WhatsApp / Mobile <span className="text-rose-600">*</span>
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    value={bookingPassengerPhone}
+                    onChange={(e) => setBookingPassengerPhone(e.target.value)}
+                    placeholder="03xx-xxxxxxx"
+                    className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-emerald-600 transition"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-slate-800 mb-1">
+                  📍 Exact Pickup Landmark / Doorstep <span className="text-rose-600">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={bookingPickupAddress}
+                  onChange={(e) => setBookingPickupAddress(e.target.value)}
+                  placeholder="e.g. Near Shell Pump, Sohrab Goth or House 12, Block 4"
+                  className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-emerald-600 transition"
+                />
+                <span className="text-[10px] text-slate-500 block mt-0.5">
+                  The driver will navigate directly to this spot to pick you up.
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  💬 Luggage or Special Note (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={bookingSpecialNotes}
+                  onChange={(e) => setBookingSpecialNotes(e.target.value)}
+                  placeholder="e.g. 2 medium bags, traveling with mother, will wait outside"
+                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-600 transition"
+                />
+              </div>
+            </div>
 
             {/* Total Due & Confirm CTA */}
             <div className="pt-2 border-t border-slate-100 flex items-center justify-between">

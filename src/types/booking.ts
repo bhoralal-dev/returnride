@@ -17,6 +17,10 @@ export interface BookingRequest {
   id: string;
   rideId: string;
   passengerId: string;
+  passengerName?: string;
+  passengerPhone?: string;
+  pickupAddress?: string;
+  specialNotes?: string;
   bookingType: BookingType;
   requestedSeats: number; // 1 for WHOLE_CAR (representing the car), or 1..N for SEAT
   totalPrice: number;

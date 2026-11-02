@@ -44,7 +44,12 @@ export interface TravelComfortAttributes {
 export interface Ride {
   id: string;
   driverId: string;
+  driverName?: string;
+  driverPhone?: string;
   vehicleId?: string;
+  vehicleMakeModel?: string;
+  vehiclePlate?: string;
+  vehicleColor?: string;
   originLocationId: string;
   destinationLocationId: string;
   departureTime: string;

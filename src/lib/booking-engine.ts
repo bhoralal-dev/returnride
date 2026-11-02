@@ -218,6 +218,10 @@ export interface CreateBookingRequestParams {
   id: string;
   ride: Ride;
   passengerId: string;
+  passengerName?: string;
+  passengerPhone?: string;
+  pickupAddress?: string;
+  specialNotes?: string;
   bookingType: BookingType;
   requestedSeats: number;
   totalPrice: number;
@@ -316,6 +320,10 @@ export function createBookingRequest(
     id,
     rideId: ride.id,
     passengerId,
+    passengerName: params.passengerName,
+    passengerPhone: params.passengerPhone,
+    pickupAddress: params.pickupAddress,
+    specialNotes: params.specialNotes,
     bookingType,
     requestedSeats,
     totalPrice,
