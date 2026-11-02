@@ -34,3 +34,10 @@ The following core behaviors are locked and MUST NEVER be regressed, removed, or
 - All 24 unit tests in `npm test` must always pass.
 - Repeat cancellation prevention & cooling-off periods must remain intact.
 
+### 4. Development & Quality Assurance Workflow
+- **Commit After Meaningful Changes**: Always create clean git commits after implementing meaningful changes or new features.
+- **Mandatory Pre-Commit Verification**:
+  - Run all unit tests (`npm test` - must pass all tests with 0 failures).
+  - Perform functionality testing and verification for the added or modified feature.
+- **Publish & Synchronize**: Once unit and functionality tests pass, commit and publish the changes cleanly.
+
