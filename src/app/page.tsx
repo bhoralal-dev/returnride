@@ -2640,11 +2640,11 @@ export default function Home() {
                       return (
                         <div
                           key={ride.id}
-                          className="bg-white rounded-2xl border border-slate-200/90 hover:border-slate-300 p-4 sm:p-5 transition shadow-2xs hover:shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 sm:gap-4"
+                          className="bg-white rounded-2xl border border-slate-200/90 hover:border-slate-300 p-4 sm:p-5 transition shadow-2xs hover:shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 sm:gap-4 overflow-hidden"
                         >
                           {/* Driver Info Row */}
-                          <div className="flex items-center gap-3 shrink-0">
-                            <div className="relative">
+                          <div className="flex items-center gap-3 shrink-0 md:w-52">
+                            <div className="relative shrink-0">
                               <span className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-lg sm:text-xl">
                                 👨‍✈️
                               </span>
@@ -2656,34 +2656,36 @@ export default function Home() {
                               </span>
                             </div>
 
-                            <div>
+                            <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className="font-extrabold text-xs sm:text-sm text-slate-900">
+                                <span className="font-extrabold text-xs sm:text-sm text-slate-900 truncate">
                                   {ride.driverName || 'Verified Captain'}
                                 </span>
-                                <span className="text-[10px] font-black text-amber-900 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">
+                                <span className="text-[10px] font-black text-amber-900 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200 shrink-0">
                                   ★ {ride.driverTier === 'TOP_RATED_DRIVER' ? '4.9' : '4.8'}
                                 </span>
-                                {ride.originLocationId === userCityId && (
-                                  <span className="text-[10px] font-black text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
+                              </div>
+                              {ride.originLocationId === userCityId && (
+                                <div className="mt-0.5">
+                                  <span className="text-[9px] font-black text-emerald-800 bg-emerald-100 px-1.5 py-0.2 rounded-full border border-emerald-300 inline-block">
                                     📍 Near You ({oName})
                                   </span>
-                                )}
-                              </div>
-                              <span className="text-[10px] sm:text-[11px] text-slate-500 font-medium block">
+                                </div>
+                              )}
+                              <span className="text-[10px] sm:text-[11px] text-slate-500 font-medium block truncate mt-0.5">
                                 {ride.vehicleMakeModel || 'Standard Car'} {ride.vehicleColor ? `• ${ride.vehicleColor}` : ''}
                               </span>
                             </div>
                           </div>
 
-                          {/* Center Column: Route & Travel Comfort Tags */}
-                          <div className="flex-1 space-y-1.5 sm:space-y-2">
+                          {/* Center Column: Route & Travel Comfort Tags (min-w-0 is required for flex truncate) */}
+                          <div className="flex-1 min-w-0 space-y-1.5 sm:space-y-2">
                             {/* Schedule Timeline */}
                             <div className="flex items-center gap-1.5 sm:gap-2 text-xs font-bold text-slate-900 flex-wrap">
-                              <span>{timeStr}</span>
+                              <span className="text-emerald-950 font-black">{timeStr}</span>
                               <span className="text-slate-500 font-normal">({oName})</span>
                               <span className="text-emerald-600 font-black">➔</span>
-                              <span>{dName}</span>
+                              <span className="text-emerald-950 font-black">{dName}</span>
                               {dateStr && (
                                 <span className="text-[10px] text-slate-400 font-medium ml-1">
                                   • {dateStr}
@@ -2693,7 +2695,10 @@ export default function Home() {
 
                             {/* Waypoint Dropoffs */}
                             {ride.routeStops && ride.routeStops.length > 0 && (
-                              <p className="text-[10px] sm:text-[11px] text-slate-500 font-medium truncate">
+                              <p
+                                className="text-[10px] sm:text-[11px] text-slate-500 font-medium truncate"
+                                title={ride.routeStops.map((s) => s.name).join(' • ')}
+                              >
                                 Stops: {ride.routeStops.map((s) => s.name).join(' • ')}
                               </p>
                             )}
@@ -2728,11 +2733,11 @@ export default function Home() {
                             </div>
                           </div>
 
-                          {/* Right Column: Pricing & Book CTA */}
-                          <div className="w-full md:w-auto flex items-center md:flex-col justify-between md:justify-center shrink-0 border-t md:border-t-0 pt-2.5 md:pt-0 border-slate-100 gap-2">
-                            <div className="text-left md:text-right">
+                          {/* Right Column: Pricing & Book CTA with Fixed Width and Clean Left Divider */}
+                          <div className="w-full md:w-36 shrink-0 flex items-center md:flex-col justify-between md:justify-center border-t md:border-t-0 pt-2.5 md:pt-0 border-slate-100 gap-2 md:pl-4 md:border-l md:border-slate-100">
+                            <div className="text-left md:text-right w-full">
                               <span className="text-[10px] sm:text-xs text-slate-400 font-bold block">Per Seat</span>
-                              <div className="flex items-baseline gap-1">
+                              <div className="flex items-baseline md:justify-end gap-1">
                                 <span className="text-base sm:text-xl font-black text-slate-900">
                                   Rs. {ride.seatPrice?.toLocaleString()}
                                 </span>
@@ -2746,7 +2751,7 @@ export default function Home() {
                               type="button"
                               onClick={() => handleSelectRideForBooking(ride)}
                               disabled={isFull}
-                              className={`px-4 sm:px-5 py-2 sm:py-2.5 rounded-full font-bold text-xs transition cursor-pointer shadow-xs ${
+                              className={`w-full sm:w-auto md:w-full px-4 sm:px-5 py-2 sm:py-2.5 rounded-full font-bold text-xs transition cursor-pointer shadow-xs text-center ${
                                 isFull
                                   ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
                                   : 'bg-emerald-700 hover:bg-emerald-800 text-white'
