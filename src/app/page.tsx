@@ -314,7 +314,7 @@ export default function Home() {
   const [activeTagFilter, setActiveTagFilter] = useState<'ALL' | 'KHALI_WAPSI' | 'FAMILY' | 'MAX_2_BACK' | 'LADIES_ONLY'>('ALL');
 
   // Authentication State (Unified Email/Phone + Ref Design UX)
-  const [showAuthModal, setShowAuthModal] = useState(true);
+  const [showAuthModal, setShowAuthModal] = useState(false);
   const [authTab, setAuthTab] = useState<'SIGNIN' | 'SIGNUP'>('SIGNIN');
   const [authMethod, setAuthMethod] = useState<'PASSWORD' | 'OTP'>('PASSWORD');
   const [authIdentifier, setAuthIdentifier] = useState('');
@@ -462,39 +462,178 @@ export default function Home() {
     };
   };
 
-  // Check Supabase session on client load and subscribe to auth state changes
+  // Persistent helpers to keep localStorage, BroadcastChannel, and React state synchronized
+  const saveCurrentUser = (user: AppUserProfile | null) => {
+    setCurrentUser(user);
+    if (typeof window !== 'undefined') {
+      try {
+        if (user) {
+          localStorage.setItem('apnisawari_current_user_v1', JSON.stringify(user));
+        } else {
+          localStorage.removeItem('apnisawari_current_user_v1');
+        }
+      } catch {}
+    }
+  };
+
+  const saveRides = (updatedRides: Ride[], broadcastAction?: string, item?: Ride) => {
+    setRides(updatedRides);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('apnisawari_rides_v1', JSON.stringify(updatedRides));
+        if ('BroadcastChannel' in window) {
+          const bc = new BroadcastChannel('apnisawari_sync_channel');
+          bc.postMessage({ type: 'SYNC_RIDES', payload: updatedRides, action: broadcastAction, item });
+          bc.close();
+        }
+      } catch {}
+    }
+  };
+
+  const saveBookings = (updatedBookings: BookingRequest[]) => {
+    setBookings(updatedBookings);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('apnisawari_bookings_v1', JSON.stringify(updatedBookings));
+        if ('BroadcastChannel' in window) {
+          const bc = new BroadcastChannel('apnisawari_sync_channel');
+          bc.postMessage({ type: 'SYNC_BOOKINGS', payload: updatedBookings });
+          bc.close();
+        }
+      } catch {}
+    }
+  };
+
+  const savePassengerRequests = (updatedRequests: PassengerRideRequest[]) => {
+    setPassengerRequests(updatedRequests);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('apnisawari_requests_v1', JSON.stringify(updatedRequests));
+        if ('BroadcastChannel' in window) {
+          const bc = new BroadcastChannel('apnisawari_sync_channel');
+          bc.postMessage({ type: 'SYNC_REQUESTS', payload: updatedRequests });
+          bc.close();
+        }
+      } catch {}
+    }
+  };
+
+  // Check Supabase session on client load, restore local state, and listen to cross-tab updates
   useEffect(() => {
     setIsClientLoaded(true);
 
+    // 1. Instant local restoration so page reload NEVER flickers or asks to sign in again
+    if (typeof window !== 'undefined') {
+      try {
+        const savedUserStr = localStorage.getItem('apnisawari_current_user_v1');
+        if (savedUserStr) {
+          const savedUser = JSON.parse(savedUserStr);
+          if (savedUser && savedUser.id) {
+            setCurrentUser(savedUser);
+            if (savedUser.role === 'DRIVER') {
+              setPortalMode('DRIVER');
+            }
+          }
+        }
+
+        const savedRidesStr = localStorage.getItem('apnisawari_rides_v1');
+        if (savedRidesStr) {
+          const savedRides = JSON.parse(savedRidesStr);
+          if (Array.isArray(savedRides) && savedRides.length > 0) {
+            const savedIds = new Set(savedRides.map((r: Ride) => r.id));
+            const baseNotIncluded = INITIAL_RIDES.filter((r) => !savedIds.has(r.id));
+            setRides([...savedRides, ...baseNotIncluded]);
+          }
+        }
+
+        const savedBookingsStr = localStorage.getItem('apnisawari_bookings_v1');
+        if (savedBookingsStr) {
+          const savedBookings = JSON.parse(savedBookingsStr);
+          if (Array.isArray(savedBookings)) {
+            setBookings(savedBookings);
+          }
+        }
+
+        const savedRequestsStr = localStorage.getItem('apnisawari_requests_v1');
+        if (savedRequestsStr) {
+          const savedRequests = JSON.parse(savedRequestsStr);
+          if (Array.isArray(savedRequests)) {
+            setPassengerRequests(savedRequests);
+          }
+        }
+      } catch {
+        // Safe ignore
+      }
+    }
+
+    // 2. Real-time Cross-Tab BroadcastChannel listener
+    let channel: BroadcastChannel | null = null;
+    try {
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+        channel = new BroadcastChannel('apnisawari_sync_channel');
+        channel.onmessage = (event) => {
+          const { type, payload, item } = event.data || {};
+          if (type === 'SYNC_RIDES' && Array.isArray(payload)) {
+            setRides(payload);
+            if (item) {
+              const oName = NATIONWIDE_CITIES.find((c) => c.id === item.originLocationId)?.name || 'Origin';
+              const dName = NATIONWIDE_CITIES.find((c) => c.id === item.destinationLocationId)?.name || 'Destination';
+              setNotification({
+                type: 'info',
+                title: '⚡ Live Network Update',
+                message: `New ride published: ${oName} ➔ ${dName}. Showing across Apni Sawari network.`,
+              });
+            }
+          } else if (type === 'SYNC_BOOKINGS' && Array.isArray(payload)) {
+            setBookings(payload);
+          } else if (type === 'SYNC_REQUESTS' && Array.isArray(payload)) {
+            setPassengerRequests(payload);
+          }
+        };
+      }
+    } catch {}
+
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'apnisawari_rides_v1' && e.newValue) {
+        try { setRides(JSON.parse(e.newValue)); } catch {}
+      } else if (e.key === 'apnisawari_bookings_v1' && e.newValue) {
+        try { setBookings(JSON.parse(e.newValue)); } catch {}
+      } else if (e.key === 'apnisawari_requests_v1' && e.newValue) {
+        try { setPassengerRequests(JSON.parse(e.newValue)); } catch {}
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+
+    // 3. Supabase Auth state checking in background (never forcibly pops modal)
     if (supabase) {
       supabase.auth.getSession().then(({ data: { session } }) => {
         if (session?.user) {
           const profile = mapSupabaseUserToProfile(session.user);
-          setCurrentUser(profile);
-          setShowAuthModal(false);
+          saveCurrentUser(profile);
           if (profile.role === 'DRIVER') {
             setPortalMode('DRIVER');
           }
-        } else {
-          setShowAuthModal(true);
-          setAuthTab('SIGNIN');
         }
       });
 
       const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
         if (session?.user) {
           const profile = mapSupabaseUserToProfile(session.user);
-          setCurrentUser(profile);
-          setShowAuthModal(false);
-        } else {
-          setCurrentUser(null);
+          saveCurrentUser(profile);
         }
       });
 
       return () => {
         subscription.unsubscribe();
+        if (channel) channel.close();
+        window.removeEventListener('storage', handleStorageChange);
       };
     }
+
+    return () => {
+      if (channel) channel.close();
+      window.removeEventListener('storage', handleStorageChange);
+    };
   }, []);
 
   // Sync profile form when currentUser changes
@@ -537,17 +676,17 @@ export default function Home() {
   }, [currentUser, cancellationEvents, appeals]);
 
   // City Name Helpers
-  const originCityName = NATIONWIDE_CITIES.find((c) => c.id === searchOrigin)?.name || 'Origin';
-  const destCityName = NATIONWIDE_CITIES.find((c) => c.id === searchDest)?.name || 'Destination';
+  const originCityName = searchOrigin === 'ALL' ? 'All Pakistan' : (NATIONWIDE_CITIES.find((c) => c.id === searchOrigin)?.name || 'Origin');
+  const destCityName = searchDest === 'ALL' ? 'Anywhere in Pakistan' : (NATIONWIDE_CITIES.find((c) => c.id === searchDest)?.name || 'Destination');
 
   // Filter rides matching search criteria
   const matchingRides = useMemo(() => {
     return rides.filter((r) => {
       if (r.status === 'CANCELLED' || r.status === 'COMPLETED') return false;
 
-      // Origin and destination match
-      if (searchOrigin && r.originLocationId !== searchOrigin) return false;
-      if (searchDest && r.destinationLocationId !== searchDest) return false;
+      // Origin and destination match (allows "ALL" for nationwide network view)
+      if (searchOrigin && searchOrigin !== 'ALL' && r.originLocationId !== searchOrigin) return false;
+      if (searchDest && searchDest !== 'ALL' && r.destinationLocationId !== searchDest) return false;
 
       // Tag filters
       if (activeTagFilter === 'KHALI_WAPSI' && !r.isReturnDeal) return false;
@@ -750,7 +889,7 @@ export default function Home() {
       vehicle: updatedVehicle,
     };
 
-    setCurrentUser(updatedUser);
+    saveCurrentUser(updatedUser);
 
     if (supabase) {
       supabase.auth.updateUser({
@@ -809,10 +948,30 @@ export default function Home() {
       updatedAt: new Date().toISOString(),
     };
 
-    setRides((prev) => [newRide, ...prev]);
+    const updatedRides = [newRide, ...rides.filter((r) => r.id !== newRide.id)];
+    saveRides(updatedRides, 'PUBLISH', newRide);
     setShowOfferRideModal(false);
     setPortalMode('DRIVER');
     setActiveDriverNav('driver_trips');
+
+    if (typeof window !== 'undefined') {
+      fetch('/api/rides', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          driverId: currentUser.id,
+          vehicleId: newRide.vehicleId,
+          originLocationId: postOrigin,
+          destinationLocationId: postDest,
+          departureTime: newRide.departureTime,
+          bookingMode: postMode,
+          capacity: newRide.capacity,
+          wholeCarPrice: Number(postCarPrice),
+          seatPrice: Number(postSeatPrice),
+          notes: postNotes,
+        }),
+      }).catch(() => {});
+    }
 
     const oName = NATIONWIDE_CITIES.find((c) => c.id === postOrigin)?.name || 'Origin';
     const dName = NATIONWIDE_CITIES.find((c) => c.id === postDest)?.name || 'Destination';
@@ -890,7 +1049,8 @@ export default function Home() {
         confirmedBookings: rideBookings,
       });
 
-      setBookings((prev) => [newBooking, ...prev]);
+      const updatedBookings = [newBooking, ...bookings];
+      saveBookings(updatedBookings);
       setShowBookingModal(false);
       setPortalMode('PASSENGER');
       setActivePassengerNav('my_bookings');
@@ -922,15 +1082,16 @@ export default function Home() {
         confirmedBookings: currentRideBookings,
       });
 
-      setRides((prev) => prev.map((r) => (r.id === result.updatedRide.id ? result.updatedRide : r)));
-      setBookings((prev) =>
-        prev.map((b) => {
-          if (b.id === result.acceptedRequest.id) return result.acceptedRequest;
-          const autoRejected = result.autoRejectedRequests.find((r) => r.id === b.id);
-          if (autoRejected) return autoRejected;
-          return b;
-        })
-      );
+      const updatedRides = rides.map((r) => (r.id === result.updatedRide.id ? result.updatedRide : r));
+      const updatedBookings = bookings.map((b) => {
+        if (b.id === result.acceptedRequest.id) return result.acceptedRequest;
+        const autoRejected = result.autoRejectedRequests.find((r) => r.id === b.id);
+        if (autoRejected) return autoRejected;
+        return b;
+      });
+
+      saveRides(updatedRides);
+      saveBookings(updatedBookings);
 
       setNotification({
         type: 'success',
@@ -947,7 +1108,8 @@ export default function Home() {
   // Reject Booking Request (Driver Action)
   const handleRejectBooking = (booking: BookingRequest) => {
     const rejected = rejectBookingRequest(booking, 'Driver cannot accommodate requested seats.');
-    setBookings((prev) => prev.map((b) => (b.id === rejected.id ? rejected : b)));
+    const updatedBookings = bookings.map((b) => (b.id === rejected.id ? rejected : b));
+    saveBookings(updatedBookings);
     setNotification({
       type: 'info',
       title: 'Booking Declined',
@@ -967,8 +1129,10 @@ export default function Home() {
         cancelledBy: 'PASSENGER',
         reason: 'Schedule changed',
       });
-      setRides((prev) => prev.map((r) => (r.id === result.updatedRide.id ? result.updatedRide : r)));
-      setBookings((prev) => prev.map((b) => (b.id === result.updatedBooking.id ? result.updatedBooking : b)));
+      const updatedRides = rides.map((r) => (r.id === result.updatedRide.id ? result.updatedRide : r));
+      const updatedBookings = bookings.map((b) => (b.id === result.updatedBooking.id ? result.updatedBooking : b));
+      saveRides(updatedRides);
+      saveBookings(updatedBookings);
 
       setNotification({
         type: 'info',
@@ -1027,7 +1191,8 @@ export default function Home() {
       createdAt: new Date().toISOString(),
     };
 
-    setPassengerRequests((prev) => [newReq, ...prev]);
+    const updatedReqs = [newReq, ...passengerRequests];
+    savePassengerRequests(updatedReqs);
     setShowPostRequestModal(false);
     setNotification({
       type: 'success',
@@ -1037,7 +1202,8 @@ export default function Home() {
   };
 
   const handleCancelSawariRequest = (requestId: string) => {
-    setPassengerRequests((prev) => prev.filter((r) => r.id !== requestId));
+    const updatedReqs = passengerRequests.filter((r) => r.id !== requestId);
+    savePassengerRequests(updatedReqs);
     setNotification({
       type: 'info',
       title: 'Request Cancelled',
@@ -1067,9 +1233,8 @@ export default function Home() {
       createdAt: new Date().toISOString(),
     };
 
-    setPassengerRequests((prev) =>
-      prev.map((r) => (r.id === req.id ? { ...r, offers: [...r.offers, newOffer] } : r))
-    );
+    const updatedReqs = passengerRequests.map((r) => (r.id === req.id ? { ...r, offers: [...r.offers, newOffer] } : r));
+    savePassengerRequests(updatedReqs);
 
     setNotification({
       type: 'success',
@@ -1108,9 +1273,8 @@ export default function Home() {
       createdAt: new Date().toISOString(),
     };
 
-    setPassengerRequests((prev) =>
-      prev.map((r) => (r.id === selectedReqForOffer.id ? { ...r, offers: [...r.offers, newOffer] } : r))
-    );
+    const updatedReqs = passengerRequests.map((r) => (r.id === selectedReqForOffer.id ? { ...r, offers: [...r.offers, newOffer] } : r));
+    savePassengerRequests(updatedReqs);
 
     setSelectedReqForOffer(null);
     setNotification({
@@ -1122,9 +1286,10 @@ export default function Home() {
 
   // Passenger confirms a driver offer
   const handleAcceptDriverOffer = (req: PassengerRideRequest, offer: DriverOffer) => {
-    setPassengerRequests((prev) =>
-      prev.map((r) => (r.id === req.id ? { ...r, status: 'ACCEPTED', acceptedOfferId: offer.id } : r))
+    const updatedReqs: PassengerRideRequest[] = passengerRequests.map((r) =>
+      r.id === req.id ? { ...r, status: 'ACCEPTED' as const, acceptedOfferId: offer.id } : r
     );
+    savePassengerRequests(updatedReqs);
 
     setNotification({
       type: 'success',
@@ -1170,7 +1335,7 @@ export default function Home() {
       vehicle: updatedVehicle,
     };
 
-    setCurrentUser(updated);
+    saveCurrentUser(updated);
 
     if (supabase) {
       supabase.auth.updateUser({
@@ -1267,7 +1432,7 @@ export default function Home() {
 
         if (data.user) {
           const profile = mapSupabaseUserToProfile(data.user);
-          setCurrentUser(profile);
+          saveCurrentUser(profile);
           setShowAuthModal(false);
           setAuthPassword('');
           setNotification({
@@ -1350,7 +1515,7 @@ export default function Home() {
               city: 'Karachi',
               verificationStatus: 'VERIFIED',
             };
-            setCurrentUser(profile);
+            saveCurrentUser(profile);
             setShowAuthModal(false);
             setOtpSent(false);
             setOtpCode('');
@@ -1385,7 +1550,7 @@ export default function Home() {
               city: 'Karachi',
               verificationStatus: 'VERIFIED',
             };
-            setCurrentUser(profile);
+            saveCurrentUser(profile);
             setShowAuthModal(false);
             setOtpSent(false);
             setOtpCode('');
@@ -1621,7 +1786,7 @@ export default function Home() {
 
         if (!signInError && signInData?.user) {
           const profile = mapSupabaseUserToProfile(signInData.user);
-          setCurrentUser(profile);
+          saveCurrentUser(profile);
           setShowAuthModal(false);
           setOtpSent(false);
           setOtpCode('');
@@ -1656,7 +1821,7 @@ export default function Home() {
         emergencyContact: authEmergencyContact.trim() || undefined,
         verificationStatus: 'VERIFIED',
       };
-      setCurrentUser(fallbackProfile);
+      saveCurrentUser(fallbackProfile);
       setShowAuthModal(false);
       setOtpSent(false);
       setOtpCode('');
@@ -1690,7 +1855,7 @@ export default function Home() {
         // Safe ignore
       }
     }
-    setCurrentUser(null);
+    saveCurrentUser(null);
     setShowProfileModal(false);
     setPortalMode('PASSENGER');
     setActivePassengerNav('find_ride');
@@ -2016,6 +2181,7 @@ export default function Home() {
                         onChange={(e) => setSearchOrigin(e.target.value)}
                         className="w-full bg-transparent text-xs sm:text-sm font-extrabold text-slate-900 focus:outline-none cursor-pointer"
                       >
+                        <option value="ALL">🇵🇰 All Pakistan (Any City)</option>
                         {NATIONWIDE_CITIES.map((c) => (
                           <option key={c.id} value={c.id}>
                             {c.name} ({c.province})
@@ -2049,6 +2215,7 @@ export default function Home() {
                         onChange={(e) => setSearchDest(e.target.value)}
                         className="w-full bg-transparent text-xs sm:text-sm font-extrabold text-slate-900 focus:outline-none cursor-pointer"
                       >
+                        <option value="ALL">🇵🇰 Anywhere in Pakistan</option>
                         {NATIONWIDE_CITIES.map((c) => (
                           <option key={c.id} value={c.id}>
                             {c.name} ({c.province})
@@ -2081,6 +2248,18 @@ export default function Home() {
                 {/* Popular Route Shortcuts (Horizontally Scrollable on Mobile) */}
                 <div className="mt-3 flex items-center justify-start sm:justify-center overflow-x-auto gap-1.5 text-xs pb-1 scrollbar-none">
                   <span className="text-[10px] sm:text-[11px] text-slate-400 font-bold uppercase shrink-0">Popular:</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchOrigin('ALL');
+                      setSearchDest('ALL');
+                      setHasSearched(true);
+                    }}
+                    className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-full transition font-extrabold cursor-pointer shrink-0 text-[11px] flex items-center gap-1"
+                  >
+                    <span>🇵🇰</span>
+                    <span>All Pakistan Rides</span>
+                  </button>
                   <button
                     type="button"
                     onClick={() => {
