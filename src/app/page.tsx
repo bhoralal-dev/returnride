@@ -645,6 +645,9 @@ export default function Home() {
   // Safety & Emergency SOS Shield State
   const [showSosModal, setShowSosModal] = useState<boolean>(false);
 
+  // Google OAuth Setup & Fallback Modal State
+  const [showGoogleSetupModal, setShowGoogleSetupModal] = useState<{ isOpen: boolean; callbackUrl: string } | null>(null);
+
   // Auto-scroll chat to latest message
   useEffect(() => {
     if (showChatModal && chatMessagesEndRef.current) {
@@ -2384,14 +2387,18 @@ export default function Home() {
     };
   };
 
-  // 1-Click Sign in with Google (OAuth with prompt: select_account for device account chooser)
+  // 1-Click Sign in with Google (Protected with pre-flight check to prevent raw 400 screen)
   const handleGoogleSignIn = async () => {
     setAuthLoading(true);
     setAuthError(null);
 
-    // If Supabase is configured in cloud, invoke real Google OAuth with select_account prompt
-    if (supabase && isSupabaseConfigured) {
-      try {
+    try {
+      // Pre-flight check: verify if Supabase project has Google provider enabled
+      const statusRes = await fetch('/api/auth/google-status');
+      const statusData = await statusRes.json();
+
+      if (statusData.enabled && supabase) {
+        // Provider is officially enabled in Supabase! Proceed with real OAuth redirect
         const { error } = await supabase.auth.signInWithOAuth({
           provider: 'google',
           options: {
@@ -2403,14 +2410,25 @@ export default function Home() {
           },
         });
         if (error) throw error;
-        return; // Redirecting to Google account chooser
-      } catch (err: unknown) {
-        console.warn('Google Cloud OAuth not fully enabled in Supabase provider dashboard, using seamless verified session fallback:', err);
+        return;
       }
-    }
 
-    // High-fidelity fallback / Instant Demo Mode if Google Client ID not yet plugged into Supabase
-    // Creates a verified Google profile, saves user, and closes modal
+      // If Google provider is currently OFF in Supabase, prevent broken 400 redirect!
+      setAuthLoading(false);
+      setShowGoogleSetupModal({
+        isOpen: true,
+        callbackUrl: statusData.callbackUrl || 'https://yefaqlrczrbdumjuramb.supabase.co/auth/v1/callback',
+      });
+    } catch {
+      setAuthLoading(false);
+      setShowGoogleSetupModal({
+        isOpen: true,
+        callbackUrl: 'https://yefaqlrczrbdumjuramb.supabase.co/auth/v1/callback',
+      });
+    }
+  };
+
+  const handleGoogleDemoSignIn = () => {
     const googleEmail = authIdentifier.includes('@') ? authIdentifier.trim().toLowerCase() : 'user.google@gmail.com';
     const googleName = googleEmail.split('@')[0].replace(/[._]/g, ' ');
     const formattedName = googleName.charAt(0).toUpperCase() + googleName.slice(1);
@@ -2430,6 +2448,7 @@ export default function Home() {
     };
 
     saveCurrentUser(googleUser, true);
+    setShowGoogleSetupModal(null);
     setShowAuthModal(false);
     setAuthLoading(false);
     setNotification({
@@ -7678,6 +7697,114 @@ export default function Home() {
                   <span className="text-xs font-bold text-slate-700 bg-slate-200 px-2 py-1 rounded-lg">Call Relative</span>
                 </a>
               )}
+
+      {/* MODAL 13: GOOGLE AUTH SETUP & 1-CLICK INSTANT TEST MODAL */}
+      {showGoogleSetupModal && showGoogleSetupModal.isOpen && (
+        <div className="fixed inset-0 z-60 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white w-full max-w-lg rounded-2xl sm:rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-amber-100 text-amber-800 flex items-center justify-center text-xl font-bold">
+                  ⚙️
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900">Google Sign-In Setup</h3>
+                  <p className="text-xs text-amber-800 font-semibold">Supabase Provider Currently Disabled</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowGoogleSetupModal(null)}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center text-sm font-bold cursor-pointer transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Why this happened banner */}
+            <div className="bg-amber-50 border border-amber-200 p-3.5 rounded-2xl space-y-1.5 text-xs text-amber-900 leading-relaxed">
+              <div className="flex items-center gap-1.5 font-black text-amber-950 text-xs">
+                <span>ℹ️</span>
+                <span>Why did Supabase show &quot;Unsupported provider&quot;?</span>
+              </div>
+              <p>
+                Aapke Supabase project (<code className="bg-amber-100 px-1 py-0.5 rounded font-mono font-bold">yefaqlrczrbdumjuramb</code>) me Google Auth provider filhal <strong>Disabled (OFF)</strong> hai. Real Google Account Chooser chalane ke liye Supabase Dashboard me Google ko ON karna hota hai.
+              </p>
+            </div>
+
+            {/* 3-Step Setup Instructions */}
+            <div className="space-y-2.5 bg-slate-50 p-4 rounded-2xl border border-slate-200 text-xs">
+              <span className="text-[10px] uppercase font-black tracking-wider text-slate-500 block">
+                How to Enable Real Google OAuth (2 Minutes)
+              </span>
+
+              <div className="space-y-2 text-slate-700">
+                <div className="flex items-start gap-2">
+                  <span className="w-5 h-5 rounded-full bg-emerald-700 text-white flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">
+                    1
+                  </span>
+                  <span>
+                    Open{' '}
+                    <a
+                      href="https://supabase.com/dashboard/project/yefaqlrczrbdumjuramb/auth/providers"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-bold text-emerald-700 underline"
+                    >
+                      Supabase Dashboard ➔ Auth ➔ Providers ➔ Google
+                    </a>
+                  </span>
+                </div>
+
+                <div className="flex items-start gap-2">
+                  <span className="w-5 h-5 rounded-full bg-emerald-700 text-white flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">
+                    2
+                  </span>
+                  <span>Toggle <strong>&quot;Enable Google provider&quot;</strong> to ON.</span>
+                </div>
+
+                <div className="flex items-start gap-2">
+                  <span className="w-5 h-5 rounded-full bg-emerald-700 text-white flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">
+                    3
+                  </span>
+                  <span>
+                    Google Cloud Console se <strong>Client ID</strong> aur <strong>Client Secret</strong> paste karein.<br />
+                    <span className="text-[11px] text-slate-500">
+                      Redirect URL:{' '}
+                      <code className="bg-slate-200 px-1 py-0.5 rounded text-[10px] font-mono break-all select-all">
+                        {showGoogleSetupModal.callbackUrl}
+                      </code>
+                    </span>
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Instant Demo Option */}
+            <div className="pt-1 space-y-2">
+              <button
+                type="button"
+                onClick={handleGoogleDemoSignIn}
+                className="w-full py-3 bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs sm:text-sm rounded-2xl shadow-xs transition cursor-pointer flex items-center justify-center gap-2"
+              >
+                <span>🚀</span>
+                <span>Continue &amp; Test as Verified Google User (1-Click)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowGoogleSetupModal(null);
+                  setAuthTab('SIGNIN');
+                }}
+                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-2xl transition cursor-pointer"
+              >
+                Sign in with Password / Mobile OTP instead
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
             </div>
 
             <button
