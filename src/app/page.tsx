@@ -2312,9 +2312,11 @@ export default function Home() {
               }}
               className="flex items-center gap-2 cursor-pointer text-left group"
             >
-              <span className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-emerald-700 text-white flex items-center justify-center text-base sm:text-lg font-black shadow-xs group-hover:bg-emerald-800 transition">
-                🚗
-              </span>
+              <img
+                src="/logos/logo-option4.jpg"
+                alt="Apni Sawari Logo"
+                className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl object-cover shadow-xs border border-emerald-600/30 group-hover:border-emerald-600 transition shrink-0"
+              />
               <div>
                 <div className="flex items-center gap-1.5">
                   <span className="text-sm sm:text-base font-black tracking-tight text-slate-900 group-hover:text-emerald-800 transition">
@@ -5845,9 +5847,11 @@ export default function Home() {
           <div className="bg-white w-full max-w-lg rounded-2xl sm:rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2.5">
-                <span className="w-10 h-10 rounded-2xl bg-emerald-700 text-white flex items-center justify-center text-xl shadow-xs">
-                  📲
-                </span>
+                <img
+                  src="/logos/logo-option4.jpg"
+                  alt="Apni Sawari App Icon"
+                  className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl object-cover shadow-sm border border-emerald-600/30 shrink-0"
+                />
                 <div>
                   <h3 className="text-base font-black text-slate-900">Install Apni Sawari App</h3>
                   <p className="text-xs text-slate-500">Android APK &amp; Mobile Web App Guide</p>
