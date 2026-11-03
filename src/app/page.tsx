@@ -2966,7 +2966,7 @@ export default function Home() {
               className="flex items-center gap-2 cursor-pointer text-left group"
             >
               <img
-                src="/logos/logo-option4.jpg"
+                src="/icon-192.png"
                 alt="Apni Sawari Logo"
                 className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl object-cover shadow-xs border border-emerald-600/30 group-hover:border-emerald-600 transition shrink-0"
               />
@@ -7061,7 +7061,7 @@ export default function Home() {
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2.5">
                 <img
-                  src="/logos/logo-option4.jpg"
+                  src="/icon-192.png"
                   alt="Apni Sawari App Icon"
                   className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl object-cover shadow-sm border border-emerald-600/30 shrink-0"
                 />

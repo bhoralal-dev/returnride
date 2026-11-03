@@ -24,12 +24,12 @@ self.addEventListener('fetch', (event) => {
   // Navigation & API requests pass directly through
   if (event.request.mode === 'navigate') {
     event.respondWith(
-      fetch(event.request).catch(() => caches.match(event.request) as Promise<Response>)
+      fetch(event.request).catch(() => caches.match(event.request))
     );
     return;
   }
 
   event.respondWith(
-    fetch(event.request).catch(() => caches.match(event.request) as Promise<Response>)
+    fetch(event.request).catch(() => caches.match(event.request))
   );
 });
