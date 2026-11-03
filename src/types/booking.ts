@@ -7,6 +7,7 @@ export type BookingType = 'WHOLE_CAR' | 'SEAT';
 export type BookingStatus =
   | 'PENDING' // Awaiting driver review
   | 'ACCEPTED' // Confirmed by driver, consumes capacity
+  | 'COMPLETED' // Safely completed journey
   | 'REJECTED' // Explicitly declined by driver
   | 'EXPIRED' // Driver did not respond before departure or TTL
   | 'CANCELLED_BY_PASSENGER' // Cancelled by customer

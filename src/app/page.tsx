@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { normalizePakistaniPhone, getWhatsAppUrl, getCallUrl, formatPakistaniCnic, validatePakistaniCnic } from '@/lib/phone';
@@ -31,6 +31,57 @@ import type {
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+}
+
+export interface ChatMessage {
+  id: string;
+  bookingId: string;
+  senderId: string;
+  senderName: string;
+  senderRole: 'DRIVER' | 'PASSENGER';
+  text?: string;
+  location?: {
+    lat: number;
+    lng: number;
+    address?: string;
+    mapUrl: string;
+  };
+  timestamp: string;
+}
+
+export interface ActiveChatBooking {
+  bookingId: string;
+  rideId: string;
+  peerId: string;
+  peerName: string;
+  peerPhone: string;
+  peerRole: 'Captain' | 'Passenger';
+  tripRoute: string;
+  totalCash: number;
+}
+
+export interface ActiveCallState {
+  bookingId: string;
+  peerName: string;
+  peerRole: 'Captain' | 'Passenger';
+  peerPhone: string;
+  status: 'RINGING' | 'CONNECTED' | 'ENDED';
+  isMuted: boolean;
+  isSpeakerOn: boolean;
+  durationSec: number;
+}
+
+export interface PassengerCelebrationState {
+  bookingId: string;
+  rideId: string;
+  driverName: string;
+  originCity: string;
+  destinationCity: string;
+  totalCash: number;
+  rating: number;
+  selectedTags: string[];
+  reviewComment: string;
+  submitted: boolean;
 }
 
 interface City {
@@ -519,12 +570,16 @@ export default function Home() {
   // User Profile Modal & Edit fields
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [profileName, setProfileName] = useState('');
+  const [profileEmail, setProfileEmail] = useState('');
   const [profilePhone, setProfilePhone] = useState('');
   const [profileCity, setProfileCity] = useState('Karachi');
   const [profileEmergency, setProfileEmergency] = useState('');
   const [profileCnic, setProfileCnic] = useState('');
   const [profileLicense, setProfileLicense] = useState('');
   const [profileAvatarUrl, setProfileAvatarUrl] = useState('');
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [showAvatarUrlInput, setShowAvatarUrlInput] = useState(false);
+  const avatarFileInputRef = useRef<HTMLInputElement>(null);
   const [profileCarModel, setProfileCarModel] = useState('');
   const [profileCarPlate, setProfileCarPlate] = useState('');
   const [profileCarCapacity, setProfileCarCapacity] = useState(4);
@@ -543,13 +598,34 @@ export default function Home() {
   const [cancellationEvents] = useState<CancellationEvent[]>([]);
   const [appeals] = useState<CancellationAppeal[]>([]);
 
+  // In-App Live Connect (Chat & VoIP Call)
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [showChatModal, setShowChatModal] = useState<boolean>(false);
+  const [activeChatBooking, setActiveChatBooking] = useState<ActiveChatBooking | null>(null);
+  const [chatInputText, setChatInputText] = useState<string>('');
+  const [isSharingLocation, setIsSharingLocation] = useState<boolean>(false);
+  const chatMessagesEndRef = useRef<HTMLDivElement>(null);
+
+  // In-App VoIP Call State
+  const [activeCall, setActiveCall] = useState<ActiveCallState | null>(null);
+
+  // Safe Journey Completion & Anti-Fraud State
+  const [showCompleteRideModal, setShowCompleteRideModal] = useState<BookingRequest | null>(null);
+  const [completeRideConfirmedCash, setCompleteRideConfirmedCash] = useState<boolean>(false);
+
+  // Passenger Celebration & 5-Star Rating State
+  const [showPassengerCelebrationModal, setShowPassengerCelebrationModal] = useState<PassengerCelebrationState | null>(null);
+
+  // Safety & Emergency SOS Shield State
+  const [showSosModal, setShowSosModal] = useState<boolean>(false);
+
   // Helper to construct AppUserProfile from Supabase Auth User
   const mapSupabaseUserToProfile = (user: { id: string; email?: string; user_metadata?: Record<string, unknown> }): AppUserProfile => {
     const meta = user.user_metadata || {};
     const role = (meta.role === 'DRIVER' ? 'DRIVER' : 'PASSENGER') as 'PASSENGER' | 'DRIVER';
     const vehicleMeta = meta.vehicle as AppUserProfile['vehicle'] | undefined;
     const isSyntheticEmail = Boolean(user.email && user.email.includes('@apnisawari.pk'));
-    const displayEmail = isSyntheticEmail ? '' : (user.email || '');
+    const displayEmail = isSyntheticEmail ? ((meta.email as string) || '') : (user.email || (meta.email as string) || '');
     const metaPhone = (meta.phone as string) || '';
     const phoneDisplay = metaPhone || (isSyntheticEmail ? user.email?.replace('phone_', '').replace('@apnisawari.pk', '') : '') || '0300-1234567';
 
@@ -559,7 +635,7 @@ export default function Home() {
       email: displayEmail,
       phone: phoneDisplay,
       role,
-      avatarUrl: role === 'DRIVER' ? '👨‍✈️' : '🧑',
+      avatarUrl: (meta.avatar_url as string) || (meta.avatarUrl as string) || (role === 'DRIVER' ? '👨‍✈️' : '🧑'),
       city: (meta.city as string) || 'Karachi',
       emergencyContact: (meta.emergency_contact || meta.emergencyContact) as string || '',
       cnicNumber: (meta.cnic_number || meta.cnic) as string || '',
@@ -930,6 +1006,7 @@ export default function Home() {
   useEffect(() => {
     if (currentUser) {
       setProfileName(currentUser.name);
+      setProfileEmail(currentUser.email || '');
       setProfilePhone(currentUser.phone);
       setProfileCity(currentUser.city || 'Karachi');
       setProfileEmergency(currentUser.emergencyContact || '');
@@ -946,6 +1023,7 @@ export default function Home() {
       }
     } else {
       setProfileName('');
+      setProfileEmail('');
       setProfilePhone('');
       setProfileCity('Karachi');
       setProfileEmergency('');
@@ -1694,10 +1772,100 @@ export default function Home() {
     });
   };
 
+  // Client-side compressed Avatar Upload Handler
+  const handleAvatarFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setNotification({
+        type: 'error',
+        title: 'Invalid File',
+        message: 'Please choose an image file (JPG, PNG, WebP).',
+      });
+      return;
+    }
+
+    setIsUploadingAvatar(true);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const MAX_SIZE = 320;
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height) {
+            if (width > MAX_SIZE) {
+              height = Math.round((height * MAX_SIZE) / width);
+              width = MAX_SIZE;
+            }
+          } else {
+            if (height > MAX_SIZE) {
+              width = Math.round((width * MAX_SIZE) / height);
+              height = MAX_SIZE;
+            }
+          }
+
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+            setProfileAvatarUrl(compressedDataUrl);
+          } else {
+            setProfileAvatarUrl(event.target?.result as string);
+          }
+          setIsUploadingAvatar(false);
+          setNotification({
+            type: 'success',
+            title: 'Photo Uploaded!',
+            message: 'Your profile picture has been updated. Click "Save Changes" to save it.',
+          });
+        } catch {
+          setProfileAvatarUrl(event.target?.result as string);
+          setIsUploadingAvatar(false);
+        }
+      };
+      img.onerror = () => {
+        setIsUploadingAvatar(false);
+        setNotification({
+          type: 'error',
+          title: 'Image Error',
+          message: 'Could not load image. Please try another file.',
+        });
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.onerror = () => {
+      setIsUploadingAvatar(false);
+      setNotification({
+        type: 'error',
+        title: 'Upload Error',
+        message: 'Could not read file.',
+      });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
   // Profile Update
   const handleUpdateProfile = (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) return;
+
+    const cleanEmail = profileEmail.trim().toLowerCase();
+    if (cleanEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      setNotification({
+        type: 'error',
+        title: 'Invalid Email',
+        message: 'Please enter a valid email address (e.g. name@example.com).',
+      });
+      return;
+    }
 
     let formattedCnic = currentUser.cnicNumber;
     if (profileCnic.trim()) {
@@ -1722,6 +1890,7 @@ export default function Home() {
     const updated: AppUserProfile = {
       ...currentUser,
       name: profileName,
+      email: cleanEmail,
       phone: profilePhone,
       city: profileCity,
       emergencyContact: profileEmergency,
@@ -1733,12 +1902,32 @@ export default function Home() {
 
     saveCurrentUser(updated);
 
+    // Sync any rides authored by this user
+    setRides((prev) =>
+      prev.map((r) =>
+        r.driverId === currentUser.id
+          ? {
+              ...r,
+              driverName: profileName,
+              driverPhone: profilePhone,
+              vehicleMakeModel: profileCarModel || r.vehicleMakeModel,
+              vehiclePlate: profileCarPlate.toUpperCase() || r.vehiclePlate,
+              vehicleColor: profileCarColor || r.vehicleColor,
+            }
+          : r
+      )
+    );
+
     if (supabase) {
       supabase.auth.updateUser({
+        ...(cleanEmail && cleanEmail !== currentUser.email && !currentUser.email.includes('@apnisawari.pk') ? { email: cleanEmail } : {}),
         data: {
           full_name: profileName,
+          email: cleanEmail,
           phone: profilePhone,
           city: profileCity,
+          avatar_url: profileAvatarUrl,
+          avatarUrl: profileAvatarUrl,
           emergency_contact: profileEmergency,
           cnic_number: formattedCnic,
           driving_license: profileLicense ? profileLicense.trim().toUpperCase() : undefined,
@@ -2494,8 +2683,12 @@ export default function Home() {
                 className="flex items-center gap-1 sm:gap-1.5 p-1 pl-1.5 pr-2 sm:pr-2.5 bg-slate-100 hover:bg-slate-200 rounded-full border border-slate-200 transition cursor-pointer"
                 title="Account Settings"
               >
-                <span className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-emerald-100 flex items-center justify-center text-xs">
-                  {currentUser.avatarUrl || '🧑'}
+                <span className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-emerald-100 flex items-center justify-center text-xs overflow-hidden shrink-0 border border-emerald-300/60 shadow-2xs">
+                  {currentUser.avatarUrl && (currentUser.avatarUrl.startsWith('data:') || currentUser.avatarUrl.startsWith('http')) ? (
+                    <img src={currentUser.avatarUrl} alt={currentUser.name} className="w-full h-full object-cover" />
+                  ) : (
+                    <span>{currentUser.avatarUrl || (currentUser.role === 'DRIVER' ? '👨‍✈️' : '🧑')}</span>
+                  )}
                 </span>
                 <span className="text-xs font-bold text-slate-800 max-w-[60px] sm:max-w-[80px] truncate hidden xs:inline">
                   {currentUser.name}
@@ -2914,8 +3107,12 @@ export default function Home() {
                             {/* Driver Profile & Vehicle */}
                             <div className="flex items-center gap-3 min-w-0">
                               <div className="relative shrink-0">
-                                <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-xl shadow-2xs">
-                                  👨‍✈️
+                                <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-xl shadow-2xs overflow-hidden">
+                                  {ride.driverId === currentUser?.id && currentUser.avatarUrl && (currentUser.avatarUrl.startsWith('data:') || currentUser.avatarUrl.startsWith('http')) ? (
+                                    <img src={currentUser.avatarUrl} alt={ride.driverName} className="w-full h-full object-cover" />
+                                  ) : (
+                                    <span>{ride.driverId === currentUser?.id ? (currentUser.avatarUrl || '👨‍✈️') : '👨‍✈️'}</span>
+                                  )}
                                 </div>
                                 <span
                                   className="absolute -bottom-0.5 -right-0.5 bg-emerald-600 text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-bold ring-2 ring-white"
@@ -3617,16 +3814,44 @@ export default function Home() {
           {/* Driver Top Banner & Quick KPI Bar */}
           <div className="bg-slate-900 text-white p-4 sm:p-6 rounded-2xl sm:rounded-3xl shadow-sm space-y-5">
             <div className="flex items-center justify-between flex-wrap gap-3">
-              <div>
-                <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800">
-                  Captain Control Hub
-                </span>
-                <h1 className="text-lg sm:text-2xl font-black mt-1.5">
-                  Welcome back, {currentUser?.name || 'Captain'}
-                </h1>
-                <p className="text-[11px] sm:text-xs text-slate-400">
-                  Vehicle: {currentUser?.vehicle?.makeModel} ({currentUser?.vehicle?.plate}) • City: {currentUser?.city}
-                </p>
+              <div className="flex items-center gap-3 sm:gap-4">
+                <button
+                  type="button"
+                  onClick={() => setShowProfileModal(true)}
+                  className="relative group shrink-0 cursor-pointer focus:outline-none"
+                  title="Update Profile Photo & Settings"
+                >
+                  <div className="w-13 h-13 sm:w-16 sm:h-16 rounded-2xl bg-slate-800 border-2 border-emerald-500/50 p-0.5 overflow-hidden flex items-center justify-center text-2xl sm:text-3xl shadow-md group-hover:border-emerald-400 group-hover:scale-105 transition-all">
+                    {currentUser?.avatarUrl && (currentUser.avatarUrl.startsWith('data:') || currentUser.avatarUrl.startsWith('http')) ? (
+                      <img src={currentUser.avatarUrl} alt={currentUser.name} className="w-full h-full object-cover rounded-xl" />
+                    ) : (
+                      <span>{currentUser?.avatarUrl || '👨‍✈️'}</span>
+                    )}
+                  </div>
+                  <span className="absolute -bottom-1 -right-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-full p-1 text-[9px] shadow-sm flex items-center justify-center leading-none">
+                    📷
+                  </span>
+                </button>
+
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800">
+                      Captain Control Hub
+                    </span>
+                    {currentUser?.email && (
+                      <span className="text-[10px] text-slate-400 font-medium hidden sm:inline flex items-center gap-1">
+                        <span>✉️</span>
+                        <span>{currentUser.email}</span>
+                      </span>
+                    )}
+                  </div>
+                  <h1 className="text-lg sm:text-2xl font-black mt-1">
+                    Welcome back, {currentUser?.name || 'Captain'}
+                  </h1>
+                  <p className="text-[11px] sm:text-xs text-slate-400">
+                    Vehicle: {currentUser?.vehicle?.makeModel} ({currentUser?.vehicle?.plate}) • City: {currentUser?.city}
+                  </p>
+                </div>
               </div>
 
               <div className="flex items-center gap-2">
@@ -4309,7 +4534,17 @@ export default function Home() {
               }}
               className="flex flex-col items-center justify-center p-1 rounded-xl transition cursor-pointer text-slate-500"
             >
-              <span className="text-base">{currentUser ? (currentUser.avatarUrl || '🧑') : '👤'}</span>
+              <span className="w-5 h-5 rounded-full flex items-center justify-center overflow-hidden">
+                {currentUser ? (
+                  currentUser.avatarUrl && (currentUser.avatarUrl.startsWith('data:') || currentUser.avatarUrl.startsWith('http')) ? (
+                    <img src={currentUser.avatarUrl} alt={currentUser.name} className="w-full h-full object-cover rounded-full" />
+                  ) : (
+                    <span className="text-base leading-none">{currentUser.avatarUrl || (currentUser.role === 'DRIVER' ? '👨‍✈️' : '🧑')}</span>
+                  )
+                ) : (
+                  <span className="text-base leading-none">👤</span>
+                )}
+              </span>
               <span className="text-[10px] mt-0.5">{currentUser ? 'Profile' : 'Sign In'}</span>
             </button>
 
@@ -4395,7 +4630,17 @@ export default function Home() {
               }}
               className="flex flex-col items-center justify-center p-1 rounded-xl transition cursor-pointer text-slate-500"
             >
-              <span className="text-base">{currentUser ? (currentUser.avatarUrl || '🧑') : '👤'}</span>
+              <span className="w-5 h-5 rounded-full flex items-center justify-center overflow-hidden">
+                {currentUser ? (
+                  currentUser.avatarUrl && (currentUser.avatarUrl.startsWith('data:') || currentUser.avatarUrl.startsWith('http')) ? (
+                    <img src={currentUser.avatarUrl} alt={currentUser.name} className="w-full h-full object-cover rounded-full" />
+                  ) : (
+                    <span className="text-base leading-none">{currentUser.avatarUrl || (currentUser.role === 'DRIVER' ? '👨‍✈️' : '🧑')}</span>
+                  )
+                ) : (
+                  <span className="text-base leading-none">👤</span>
+                )}
+              </span>
               <span className="text-[10px] mt-0.5">{currentUser ? 'Profile' : 'Sign In'}</span>
             </button>
 
@@ -5687,38 +5932,212 @@ export default function Home() {
               </button>
             </div>
 
-            <form onSubmit={handleUpdateProfile} className="space-y-3">
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Full Name</label>
+            <form onSubmit={handleUpdateProfile} className="space-y-4">
+              {/* Profile Photo & Avatar Customizer */}
+              <div className="bg-gradient-to-r from-emerald-50/70 via-slate-50 to-emerald-50/40 p-3.5 sm:p-4 rounded-2xl border border-emerald-100/80 flex flex-col sm:flex-row items-center sm:items-start gap-4">
+                {/* Circular Avatar Preview */}
+                <div className="relative group shrink-0">
+                  <div className="w-20 h-20 sm:w-22 sm:h-22 rounded-full ring-4 ring-white shadow-md bg-white border border-slate-200 flex items-center justify-center overflow-hidden">
+                    {profileAvatarUrl && (profileAvatarUrl.startsWith('data:') || profileAvatarUrl.startsWith('http')) ? (
+                      <img
+                        src={profileAvatarUrl}
+                        alt="Profile avatar"
+                        className="w-full h-full object-cover rounded-full"
+                      />
+                    ) : (
+                      <span className="text-3xl sm:text-4xl select-none">
+                        {profileAvatarUrl || (currentUser.role === 'DRIVER' ? '👨‍✈️' : '🧑')}
+                      </span>
+                    )}
+                  </div>
+                  {/* Camera icon button triggers file picker */}
+                  <button
+                    type="button"
+                    onClick={() => avatarFileInputRef.current?.click()}
+                    disabled={isUploadingAvatar}
+                    className="absolute -bottom-1 -right-1 bg-emerald-700 hover:bg-emerald-800 text-white p-2 rounded-full shadow-md transition cursor-pointer flex items-center justify-center text-xs"
+                    title="Upload new photo"
+                  >
+                    📷
+                  </button>
+                  {/* Hidden file input */}
                   <input
-                    type="text"
-                    required
-                    value={profileName}
-                    onChange={(e) => setProfileName(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none"
+                    ref={avatarFileInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/jpg"
+                    className="hidden"
+                    onChange={handleAvatarFileUpload}
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Phone Number</label>
-                  <input
-                    type="text"
-                    required
-                    value={profilePhone}
-                    onChange={(e) => setProfilePhone(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none"
-                  />
+
+                {/* Avatar actions & quick presets */}
+                <div className="flex-1 min-w-0 text-center sm:text-left space-y-2">
+                  <div className="flex items-center justify-center sm:justify-between flex-wrap gap-1.5">
+                    <div>
+                      <h4 className="text-xs font-black text-slate-900 flex items-center justify-center sm:justify-start gap-1.5">
+                        <span>Profile Photo</span>
+                        <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                          Public
+                        </span>
+                      </h4>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Upload your real photo to build instant trust with passengers &amp; captains
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-center sm:justify-start gap-2 flex-wrap pt-0.5">
+                    <button
+                      type="button"
+                      onClick={() => avatarFileInputRef.current?.click()}
+                      disabled={isUploadingAvatar}
+                      className="inline-flex items-center gap-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-bold px-3 py-1.5 rounded-xl shadow-2xs transition cursor-pointer disabled:opacity-50"
+                    >
+                      {isUploadingAvatar ? (
+                        <>
+                          <span className="animate-spin text-xs">⏳</span>
+                          <span>Processing...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>📁</span>
+                          <span>Upload Photo</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowAvatarUrlInput(!showAvatarUrlInput)}
+                      className="inline-flex items-center gap-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-[11px] font-bold px-2.5 py-1.5 rounded-xl transition cursor-pointer"
+                    >
+                      <span>🔗</span>
+                      <span>Image Link</span>
+                    </button>
+
+                    {profileAvatarUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setProfileAvatarUrl(currentUser.role === 'DRIVER' ? '👨‍✈️' : '🧑')}
+                        className="text-[11px] text-rose-600 hover:text-rose-800 font-bold px-2 py-1 cursor-pointer transition"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+
+                  {/* URL Input collapse */}
+                  {showAvatarUrlInput && (
+                    <div className="pt-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="url"
+                          placeholder="Paste image URL (https://...)"
+                          value={profileAvatarUrl.startsWith('data:') ? '' : profileAvatarUrl}
+                          onChange={(e) => setProfileAvatarUrl(e.target.value)}
+                          className="flex-1 bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-medium focus:outline-none focus:border-emerald-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowAvatarUrlInput(false)}
+                          className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Quick Preset Avatars Row */}
+                  <div className="pt-1">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                      Or pick an avatar:
+                    </span>
+                    <div className="flex items-center justify-center sm:justify-start gap-1.5 flex-wrap">
+                      {[
+                        { emoji: '👨‍✈️', label: 'Captain' },
+                        { emoji: '🧑', label: 'Rider' },
+                        { emoji: '🧕', label: 'Modest' },
+                        { emoji: '🧑‍💼', label: 'Executive' },
+                        { emoji: '🧔', label: 'Friendly' },
+                        { emoji: '😎', label: 'Cool' },
+                        { emoji: '👩', label: 'Traveler' },
+                      ].map((item) => (
+                        <button
+                          key={item.emoji}
+                          type="button"
+                          onClick={() => setProfileAvatarUrl(item.emoji)}
+                          className={`w-7 h-7 rounded-lg text-sm flex items-center justify-center border transition cursor-pointer ${
+                            profileAvatarUrl === item.emoji
+                              ? 'bg-emerald-100 border-emerald-500 ring-2 ring-emerald-400/40 shadow-xs scale-105'
+                              : 'bg-white hover:bg-slate-100 border-slate-200'
+                          }`}
+                          title={item.label}
+                        >
+                          {item.emoji}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">City</label>
-                <input
-                  type="text"
-                  value={profileCity}
-                  onChange={(e) => setProfileCity(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none"
-                />
+              {/* Contact Information & Email Fields */}
+              <div className="space-y-3 pt-1">
+                {/* Row 1: Full Name & Phone Number */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Full Name</label>
+                    <input
+                      type="text"
+                      required
+                      value={profileName}
+                      onChange={(e) => setProfileName(e.target.value)}
+                      placeholder="e.g. Tariq Khan"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-500 focus:bg-white transition"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Phone Number</label>
+                    <input
+                      type="text"
+                      required
+                      value={profilePhone}
+                      onChange={(e) => setProfilePhone(e.target.value)}
+                      placeholder="0300-1234567"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-500 focus:bg-white transition"
+                    />
+                  </div>
+                </div>
+
+                {/* Row 2: Email Address & City */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs font-bold text-slate-700">Email Address</label>
+                      <span className="text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
+                        Trip Receipts
+                      </span>
+                    </div>
+                    <input
+                      type="email"
+                      value={profileEmail}
+                      onChange={(e) => setProfileEmail(e.target.value)}
+                      placeholder="e.g. name@example.com"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-500 focus:bg-white transition"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">City / Base Station</label>
+                    <input
+                      type="text"
+                      value={profileCity}
+                      onChange={(e) => setProfileCity(e.target.value)}
+                      placeholder="e.g. Karachi, Lahore, Islamabad"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-emerald-500 focus:bg-white transition"
+                    />
+                  </div>
+                </div>
               </div>
 
               {(currentUser.role === 'DRIVER' || currentUser.vehicle) && (
