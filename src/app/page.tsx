@@ -1133,6 +1133,11 @@ export default function Home() {
     };
     window.addEventListener('appinstalled', handleAppInstalled);
 
+    // 5b. PWA Service Worker Registration for Android WebAPK (Removes Chrome corner badge)
+    if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
+
     if (typeof window !== 'undefined') {
       const isStandalone =
         window.matchMedia('(display-mode: standalone)').matches ||
