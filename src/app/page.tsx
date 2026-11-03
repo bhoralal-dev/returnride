@@ -2035,20 +2035,181 @@ export default function Home() {
     e.target.value = '';
   };
 
-  // Profile Update
-  const handleUpdateProfile = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!currentUser) return;
+  // Trigger SMS OTP for new Pakistani mobile number
+  const triggerPhoneOtpVerification = async (normPhone: { formatted: string; display: string }) => {
+    setProfileOtpModal({
+      type: 'PHONE',
+      targetValue: normPhone.formatted,
+      displayTarget: normPhone.display,
+      token: '',
+      code: '',
+      isSending: true,
+      isVerifying: false,
+      error: null,
+      resendCountdown: 60,
+    });
 
-    const cleanEmail = profileEmail.trim().toLowerCase();
-    if (cleanEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-      setNotification({
-        type: 'error',
-        title: 'Invalid Email',
-        message: 'Please enter a valid email address (e.g. name@example.com).',
+    try {
+      const res = await fetch('/api/auth/otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'send_sms', phone: normPhone.formatted }),
       });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to dispatch SMS verification code.');
+      }
+      setProfileOtpModal((prev) => (prev ? { ...prev, token: data.token || '', isSending: false } : null));
+    } catch (err: unknown) {
+      setProfileOtpModal((prev) =>
+        prev ? { ...prev, isSending: false, error: err instanceof Error ? err.message : 'Could not send SMS code.' } : null
+      );
+    }
+  };
+
+  // Trigger Email OTP for new Email address
+  const triggerEmailOtpVerification = async (emailToVerify: string, phoneOverride?: string) => {
+    setProfileOtpModal({
+      type: 'EMAIL',
+      targetValue: emailToVerify,
+      displayTarget: emailToVerify,
+      token: '',
+      code: '',
+      isSending: true,
+      isVerifying: false,
+      error: null,
+      resendCountdown: 60,
+    });
+
+    try {
+      const res = await fetch('/api/auth/otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'send_email', email: emailToVerify }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to dispatch email verification code.');
+      }
+      setProfileOtpModal((prev) => (prev ? { ...prev, token: data.token || '', isSending: false } : null));
+    } catch (err: unknown) {
+      setProfileOtpModal((prev) =>
+        prev ? { ...prev, isSending: false, error: err instanceof Error ? err.message : 'Could not send email code.' } : null
+      );
+    }
+  };
+
+  // Resend Profile OTP Code
+  const handleResendProfileOtp = async () => {
+    if (!profileOtpModal || profileOtpModal.resendCountdown > 0) return;
+    setProfileOtpModal((prev) => (prev ? { ...prev, isSending: true, error: null } : null));
+
+    try {
+      if (profileOtpModal.type === 'PHONE') {
+        const res = await fetch('/api/auth/otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'send_sms', phone: profileOtpModal.targetValue }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error || 'Failed to resend SMS code.');
+        setProfileOtpModal((prev) =>
+          prev ? { ...prev, token: data.token || '', isSending: false, resendCountdown: 60 } : null
+        );
+      } else {
+        const res = await fetch('/api/auth/otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'send_email', email: profileOtpModal.targetValue }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error || 'Failed to resend email code.');
+        setProfileOtpModal((prev) =>
+          prev ? { ...prev, token: data.token || '', isSending: false, resendCountdown: 60 } : null
+        );
+      }
+      setNotification({
+        type: 'success',
+        title: 'New Code Dispatched',
+        message: `Fresh verification code sent to ${profileOtpModal.displayTarget}.`,
+      });
+    } catch (err: unknown) {
+      setProfileOtpModal((prev) =>
+        prev ? { ...prev, isSending: false, error: err instanceof Error ? err.message : 'Error sending code' } : null
+      );
+    }
+  };
+
+  // Verify Profile OTP Code (Step 2 of Option A)
+  const handleVerifyProfileOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profileOtpModal) return;
+    if (!profileOtpModal.code.trim()) {
+      setProfileOtpModal((prev) => (prev ? { ...prev, error: 'Please enter the 6-digit code.' } : null));
       return;
     }
+
+    setProfileOtpModal((prev) => (prev ? { ...prev, isVerifying: true, error: null } : null));
+
+    try {
+      if (profileOtpModal.type === 'PHONE') {
+        const res = await fetch('/api/auth/otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'verify_sms',
+            phone: profileOtpModal.targetValue,
+            code: profileOtpModal.code.trim(),
+            token: profileOtpModal.token,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error || 'Invalid or expired verification code.');
+
+        const verifiedPhone = profileOtpModal.displayTarget;
+        setProfilePhone(verifiedPhone);
+
+        // Check if email also changed and needs OTP
+        const cleanEmail = profileEmail.trim().toLowerCase();
+        const emailChanged = cleanEmail !== (currentUser?.email || '').trim().toLowerCase();
+
+        if (emailChanged && cleanEmail) {
+          setProfileOtpModal(null);
+          triggerEmailOtpVerification(cleanEmail, verifiedPhone);
+        } else {
+          setProfileOtpModal(null);
+          finalizeProfileSave(verifiedPhone, cleanEmail);
+        }
+      } else {
+        // EMAIL OTP
+        const res = await fetch('/api/auth/otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'verify_email',
+            email: profileOtpModal.targetValue,
+            code: profileOtpModal.code.trim(),
+            token: profileOtpModal.token,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error || 'Invalid or expired verification code.');
+
+        const verifiedEmail = profileOtpModal.targetValue;
+        setProfileEmail(verifiedEmail);
+        setProfileOtpModal(null);
+        finalizeProfileSave(profilePhone, verifiedEmail);
+      }
+    } catch (err: unknown) {
+      setProfileOtpModal((prev) =>
+        prev ? { ...prev, isVerifying: false, error: err instanceof Error ? err.message : 'Invalid code.' } : null
+      );
+    }
+  };
+
+  // Final Persistence of Profile after verification
+  const finalizeProfileSave = (finalPhone: string, finalEmail: string) => {
+    if (!currentUser) return;
 
     let formattedCnic = currentUser.cnicNumber;
     if (profileCnic.trim()) {
@@ -2073,8 +2234,8 @@ export default function Home() {
     const updated: AppUserProfile = {
       ...currentUser,
       name: profileName,
-      email: cleanEmail,
-      phone: profilePhone,
+      email: finalEmail,
+      phone: finalPhone,
       city: profileCity,
       emergencyContact: profileEmergency,
       cnicNumber: formattedCnic,
@@ -2092,7 +2253,7 @@ export default function Home() {
           ? {
               ...r,
               driverName: profileName,
-              driverPhone: profilePhone,
+              driverPhone: finalPhone,
               vehicleMakeModel: profileCarModel || r.vehicleMakeModel,
               vehiclePlate: profileCarPlate.toUpperCase() || r.vehiclePlate,
               vehicleColor: profileCarColor || r.vehicleColor,
@@ -2103,11 +2264,13 @@ export default function Home() {
 
     if (supabase) {
       supabase.auth.updateUser({
-        ...(cleanEmail && cleanEmail !== currentUser.email && !currentUser.email.includes('@apnisawari.pk') ? { email: cleanEmail } : {}),
+        ...(finalEmail && finalEmail !== currentUser.email && !currentUser.email.includes('@apnisawari.pk')
+          ? { email: finalEmail }
+          : {}),
         data: {
           full_name: profileName,
-          email: cleanEmail,
-          phone: profilePhone,
+          email: finalEmail,
+          phone: finalPhone,
           city: profileCity,
           avatar_url: profileAvatarUrl,
           avatarUrl: profileAvatarUrl,
@@ -2123,8 +2286,51 @@ export default function Home() {
     setNotification({
       type: 'success',
       title: 'Profile Updated!',
-      message: 'Your personal information, photo, security credentials, and preferences have been saved.',
+      message: 'Your personal information, photo, verified contact credentials, and preferences have been saved.',
     });
+  };
+
+  // Main Profile Update Dispatcher: Instant for normal fields, OTP for Phone & Email
+  const handleUpdateProfile = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser) return;
+
+    const cleanEmail = profileEmail.trim().toLowerCase();
+    if (cleanEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      setNotification({
+        type: 'error',
+        title: 'Invalid Email',
+        message: 'Please enter a valid email address (e.g. name@example.com).',
+      });
+      return;
+    }
+
+    const phoneChanged = profilePhone.trim() !== currentUser.phone.trim();
+    const emailChanged = cleanEmail !== (currentUser.email || '').trim().toLowerCase();
+
+    // 1. If Phone changed, verify via SMS OTP first
+    if (phoneChanged) {
+      const pNorm = normalizePakistaniPhone(profilePhone);
+      if (!pNorm.valid) {
+        setNotification({
+          type: 'error',
+          title: 'Invalid Phone Number',
+          message: 'Please enter a valid Pakistani mobile number (e.g. 0300-1234567).',
+        });
+        return;
+      }
+      triggerPhoneOtpVerification(pNorm);
+      return;
+    }
+
+    // 2. If Phone did not change but Email changed, verify via Email OTP
+    if (emailChanged && cleanEmail) {
+      triggerEmailOtpVerification(cleanEmail);
+      return;
+    }
+
+    // 3. Neither changed -> instant save
+    finalizeProfileSave(currentUser.phone, cleanEmail);
   };
 
   // ===========================================================================
