@@ -813,7 +813,7 @@ export default function Home() {
     const isSyntheticEmail = Boolean(user.email && user.email.includes('@apnisawari.pk'));
     const displayEmail = isSyntheticEmail ? ((meta.email as string) || '') : (user.email || (meta.email as string) || '');
     const metaPhone = (meta.phone as string) || '';
-    const phoneDisplay = metaPhone || (isSyntheticEmail ? user.email?.replace('phone_', '').replace('@apnisawari.pk', '') : '') || '0300-1234567';
+    const phoneDisplay = metaPhone || (isSyntheticEmail ? user.email?.replace('phone_', '').replace('@apnisawari.pk', '') : '') || '';
 
     return {
       id: user.id,
