@@ -91,6 +91,35 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: error.message }, { status: 400 });
       }
 
+      // Automatically ensure row exists in user_profiles
+      try {
+        await adminClient.from('user_profiles').upsert({
+          id: data.user.id,
+          phone_number: userPhone || targetEmail,
+          full_name: cleanName,
+          role: role === 'DRIVER' ? 'DRIVER' : 'PASSENGER',
+          is_phone_verified: isPhoneAuth,
+        });
+
+        if (role === 'DRIVER' && vehicle) {
+          const [make, ...modelRest] = (vehicle.makeModel || 'Toyota Corolla').split(' ');
+          await adminClient.from('vehicles').upsert({
+            id: `veh-${data.user.id.slice(0, 8)}`,
+            driver_id: data.user.id,
+            make: make || 'Toyota',
+            model: modelRest.join(' ') || 'Corolla',
+            year: 2022,
+            license_plate: vehicle.plate || 'ABC-1234',
+            color: vehicle.color || 'White',
+            passenger_capacity: Number(vehicle.capacity) || 4,
+            has_ac: Boolean(vehicle.hasAc ?? true),
+            has_trunk_space: true,
+          });
+        }
+      } catch {
+        // Non-blocking
+      }
+
       return NextResponse.json({
         success: true,
         authIdentifier: targetEmail,

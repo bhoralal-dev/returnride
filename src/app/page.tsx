@@ -950,6 +950,12 @@ export default function Home() {
           bc.close();
         }
       } catch {}
+
+      fetch('/api/bookings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookings: updatedBookings }),
+      }).catch(() => {});
     }
   };
 
@@ -964,6 +970,13 @@ export default function Home() {
           bc.close();
         }
       } catch {}
+
+      // Real-time Nationwide server sync across all browsers and devices
+      fetch('/api/requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requests: updatedRequests }),
+      }).catch(() => {});
     }
   };
 
@@ -1115,10 +1128,85 @@ export default function Home() {
       } catch {}
     };
 
-    window.addEventListener('focus', checkAndSyncFromStorage);
+    // 4b. Real-Time Nationwide Network Sync (Across Different Browsers, Tabs & Devices)
+    const syncNetworkData = async () => {
+      if (typeof window === 'undefined') return;
+      try {
+        // Fetch live rides from server
+        const ridesRes = await fetch('/api/rides', { cache: 'no-store' });
+        if (ridesRes.ok) {
+          const data = await ridesRes.json();
+          if (Array.isArray(data.rides) && data.rides.length > 0) {
+            setRides((prevRides) => {
+              const liveMap = new Map<string, Ride>();
+              INITIAL_RIDES.forEach((r) => liveMap.set(r.id, r));
+              prevRides.forEach((r) => liveMap.set(r.id, r));
+              data.rides.forEach((r: Ride) => liveMap.set(r.id, r));
+
+              const merged = Array.from(liveMap.values());
+              try {
+                localStorage.setItem('apnisawari_rides_v1', JSON.stringify(merged));
+              } catch {}
+              return merged;
+            });
+          }
+        }
+
+        // Fetch live passenger custom requests from server
+        const reqsRes = await fetch('/api/requests', { cache: 'no-store' });
+        if (reqsRes.ok) {
+          const data = await reqsRes.json();
+          if (Array.isArray(data.requests)) {
+            setPassengerRequests((prevReqs) => {
+              const reqMap = new Map<string, PassengerRideRequest>();
+              prevReqs.forEach((r) => reqMap.set(r.id, r));
+              data.requests.forEach((r: PassengerRideRequest) => reqMap.set(r.id, r));
+              const merged = Array.from(reqMap.values());
+              try {
+                localStorage.setItem('apnisawari_requests_v1', JSON.stringify(merged));
+              } catch {}
+              return merged;
+            });
+          }
+        }
+
+        // Fetch live bookings from server
+        const bookingsRes = await fetch('/api/bookings', { cache: 'no-store' });
+        if (bookingsRes.ok) {
+          const data = await bookingsRes.json();
+          if (Array.isArray(data.bookings) && data.bookings.length > 0) {
+            setBookings((prevBookings) => {
+              const bMap = new Map<string, BookingRequest>();
+              prevBookings.forEach((b) => bMap.set(b.id, b));
+              data.bookings.forEach((b: BookingRequest) => bMap.set(b.id, b));
+              const merged = Array.from(bMap.values());
+              try {
+                localStorage.setItem('apnisawari_bookings_v1', JSON.stringify(merged));
+              } catch {}
+              return merged;
+            });
+          }
+        }
+      } catch {
+        // Safe ignore
+      }
+    };
+
+    // Initial instant sync
+    syncNetworkData();
+
+    // Fast polling interval (every 3.5s) to guarantee instantaneous cross-browser live updates
+    const networkSyncInterval = setInterval(syncNetworkData, 3500);
+
+    const handleFocusSync = () => {
+      checkAndSyncFromStorage();
+      syncNetworkData();
+    };
+    window.addEventListener('focus', handleFocusSync);
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         checkAndSyncFromStorage();
+        syncNetworkData();
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -1173,10 +1261,11 @@ export default function Home() {
       });
 
       return () => {
+        clearInterval(networkSyncInterval);
         subscription.unsubscribe();
         if (channel) channel.close();
         window.removeEventListener('storage', handleStorageChange);
-        window.removeEventListener('focus', checkAndSyncFromStorage);
+        window.removeEventListener('focus', handleFocusSync);
         document.removeEventListener('visibilitychange', handleVisibilityChange);
         window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
         window.removeEventListener('appinstalled', handleAppInstalled);
@@ -1184,9 +1273,10 @@ export default function Home() {
     }
 
     return () => {
+      clearInterval(networkSyncInterval);
       if (channel) channel.close();
       window.removeEventListener('storage', handleStorageChange);
-      window.removeEventListener('focus', checkAndSyncFromStorage);
+      window.removeEventListener('focus', handleFocusSync);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
       window.removeEventListener('appinstalled', handleAppInstalled);
@@ -1589,7 +1679,11 @@ export default function Home() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          ride: newRide,
           driverId: currentUser.id,
+          driverName: currentUser.name,
+          driverPhone: currentUser.phone,
+          vehicle: currentUser.vehicle,
           vehicleId: newRide.vehicleId,
           originLocationId: postOrigin,
           destinationLocationId: postDest,
