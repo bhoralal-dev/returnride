@@ -3251,15 +3251,15 @@ export default function Home() {
           {activePassengerNav === 'find_ride' && (
             <section className="relative overflow-hidden bg-gradient-to-b from-emerald-50/70 via-white to-slate-50 pt-8 sm:pt-12 pb-10 sm:pb-12 border-b border-slate-200/80">
               <div className="max-w-4xl mx-auto px-4 text-center space-y-2 mb-6 sm:mb-8">
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100/80 border border-emerald-300 text-emerald-900 text-[11px] font-bold shadow-2xs">
-                  <span>🇵🇰</span>
-                  <span>Pakistan&apos;s Verified Intercity Carpool &amp; Return Ride Network</span>
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100/80 border border-emerald-300 text-emerald-900 text-xs font-bold shadow-2xs">
+                  <span>🚗</span>
+                  <span>Pakistan&apos;s Verified Intercity Carpool Network</span>
                 </div>
                 <h1 className="text-2xl sm:text-4xl font-black text-slate-950 tracking-tight leading-tight">
-                  Your Pick of Verified Rides at Low Prices
+                  Safe &amp; Affordable Intercity Rides
                 </h1>
-                <p className="text-xs sm:text-sm text-slate-600 font-medium max-w-xl mx-auto">
-                  Reserve individual seats to split fuel costs, or book the entire car with background-checked drivers. Direct cash payment upon arrival.
+                <p className="text-xs sm:text-sm text-slate-600 font-medium max-w-lg mx-auto">
+                  Book single seats or reserve a full car across Pakistan. Pay direct cash to the driver upon boarding.
                 </p>
               </div>
 
@@ -3271,22 +3271,22 @@ export default function Home() {
                 >
                   {/* Leaving From */}
                   <div className="flex-1 w-full px-3.5 py-2.5 flex items-center gap-2.5 hover:bg-slate-50/80 rounded-xl md:rounded-full transition bg-slate-50/40 md:bg-transparent">
-                    <span className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center text-xs shrink-0 font-bold">
+                    <span className="w-7 h-7 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center text-xs shrink-0 font-bold">
                       🟢
                     </span>
                     <div className="w-full text-left min-w-0">
-                      <label className="block text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                        Leaving From
+                      <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">
+                        From (Kahan se?)
                       </label>
                       <select
                         value={searchOrigin}
                         onChange={(e) => setSearchOrigin(e.target.value)}
-                        className="w-full bg-transparent text-xs sm:text-sm font-extrabold text-slate-900 focus:outline-none cursor-pointer truncate"
+                        className="w-full bg-transparent text-xs sm:text-sm font-black text-slate-900 focus:outline-none cursor-pointer truncate"
                       >
-                        <option value="ALL">🇵🇰 All Pakistan (Any City)</option>
+                        <option value="ALL">All Cities (Har Shehar)</option>
                         {NATIONWIDE_CITIES.map((c) => (
                           <option key={c.id} value={c.id}>
-                            {c.name} ({c.province})
+                            {c.name}
                           </option>
                         ))}
                       </select>
@@ -3307,22 +3307,22 @@ export default function Home() {
 
                   {/* Going To */}
                   <div className="flex-1 w-full px-3.5 py-2.5 flex items-center gap-2.5 hover:bg-slate-50/80 rounded-xl md:rounded-full transition bg-slate-50/40 md:bg-transparent border-t md:border-t-0 md:border-l border-slate-200/80">
-                    <span className="w-6 h-6 rounded-full bg-rose-100 text-rose-800 flex items-center justify-center text-xs shrink-0 font-bold">
+                    <span className="w-7 h-7 rounded-full bg-rose-100 text-rose-800 flex items-center justify-center text-xs shrink-0 font-bold">
                       🔴
                     </span>
                     <div className="w-full text-left min-w-0">
-                      <label className="block text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                        Going To
+                      <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">
+                        To (Kahan jana hai?)
                       </label>
                       <select
                         value={searchDest}
                         onChange={(e) => setSearchDest(e.target.value)}
-                        className="w-full bg-transparent text-xs sm:text-sm font-extrabold text-slate-900 focus:outline-none cursor-pointer truncate"
+                        className="w-full bg-transparent text-xs sm:text-sm font-black text-slate-900 focus:outline-none cursor-pointer truncate"
                       >
-                        <option value="ALL">🇵🇰 Anywhere in Pakistan</option>
+                        <option value="ALL">Any City (Kahin bhi)</option>
                         {NATIONWIDE_CITIES.map((c) => (
                           <option key={c.id} value={c.id}>
-                            {c.name} ({c.province})
+                            {c.name}
                           </option>
                         ))}
                       </select>
@@ -3331,11 +3331,11 @@ export default function Home() {
 
                   {/* Seats */}
                   <div className="w-full md:w-36 px-3.5 py-2.5 flex items-center gap-2 hover:bg-slate-50/80 rounded-xl md:rounded-full transition bg-slate-50/40 md:bg-transparent border-t md:border-t-0 md:border-l border-slate-200/80 text-left shrink-0">
-                    <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-800 flex items-center justify-center text-xs shrink-0 font-bold">
+                    <span className="w-7 h-7 rounded-full bg-blue-100 text-blue-800 flex items-center justify-center text-xs shrink-0 font-bold">
                       👥
                     </span>
                     <div className="w-full min-w-0">
-                      <label className="block text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">
                         Seats
                       </label>
                       <select
@@ -3371,14 +3371,13 @@ export default function Home() {
                       setSearchDest('ALL');
                       setHasSearched(true);
                     }}
-                    className={`px-3 py-1 rounded-full transition font-extrabold cursor-pointer shrink-0 text-[11px] flex items-center gap-1 border ${
+                    className={`px-3 py-1 rounded-full transition font-extrabold cursor-pointer shrink-0 text-[11px] border ${
                       searchOrigin === 'ALL' && searchDest === 'ALL'
                         ? 'bg-emerald-700 text-white border-emerald-700 shadow-2xs'
                         : 'bg-white hover:bg-emerald-50 text-slate-700 border-slate-200'
                     }`}
                   >
-                    <span>🇵🇰</span>
-                    <span>All Pakistan Rides</span>
+                    All Rides
                   </button>
                   <button
                     type="button"
@@ -3536,7 +3535,7 @@ export default function Home() {
                           : 'bg-white text-purple-800 border border-purple-200 hover:bg-purple-50'
                       }`}
                     >
-                      🧕 Ladies Modesty
+                      🧕 Ladies Only
                     </button>
                   </div>
 
@@ -5065,7 +5064,7 @@ export default function Home() {
                       <span className="font-bold text-slate-900">{currentUser?.name}</span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-slate-500">🇵🇰 NADRA CNIC:</span>
+                      <span className="text-slate-500">🪪 CNIC (NADRA):</span>
                       <span className="font-mono font-bold text-slate-900">{currentUser?.cnicNumber || 'Verified on file'}</span>
                     </div>
                     <div className="flex items-center justify-between">
@@ -5390,7 +5389,7 @@ export default function Home() {
                       />
                       {authIdentifier.replace(/\D/g, '').length >= 10 && !authIdentifier.includes('@') && (
                         <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-md select-none shrink-0">
-                          🇵🇰 Mobile
+                          📱 Mobile
                         </span>
                       )}
                       {authIdentifier.includes('@') && (
@@ -5722,7 +5721,7 @@ export default function Home() {
                           />
                           {authIdentifier.replace(/\D/g, '').length >= 10 && !authIdentifier.includes('@') && (
                             <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-md select-none shrink-0">
-                              🇵🇰 Mobile (SMS)
+                              📱 Mobile (SMS)
                             </span>
                           )}
                           {authIdentifier.includes('@') && (
@@ -5901,7 +5900,7 @@ export default function Home() {
                           {/* Pakistani CNIC Number */}
                           <div>
                             <label className="block text-[11px] font-bold text-slate-700 mb-0.5">
-                              🇵🇰 NADRA CNIC Number (13 Digits) <span className="text-red-500">*</span>
+                              🪪 CNIC Number (13 Digits) <span className="text-red-500">*</span>
                             </label>
                             <input
                               type="text"
@@ -6324,7 +6323,7 @@ export default function Home() {
                 {/* Driver Security: CNIC */}
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    🇵🇰 NADRA CNIC Number (13 Digits) <span className="text-red-500">*</span>
+                    🪪 CNIC Number (13 Digits) <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="text"
@@ -6928,7 +6927,7 @@ export default function Home() {
                   {/* CNIC & Driving License */}
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-600 mb-1">🇵🇰 NADRA CNIC</label>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">🪪 CNIC (NADRA)</label>
                       <input
                         type="text"
                         maxLength={15}
