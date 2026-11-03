@@ -6629,7 +6629,18 @@ export default function Home() {
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Phone Number</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs font-bold text-slate-700">Phone Number</label>
+                      {profilePhone.trim() !== currentUser.phone.trim() ? (
+                        <span className="text-[10px] text-amber-700 font-bold bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
+                          Requires SMS OTP
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                          Verified ✓
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="text"
                       required
@@ -6646,9 +6657,19 @@ export default function Home() {
                   <div>
                     <div className="flex items-center justify-between mb-1">
                       <label className="block text-xs font-bold text-slate-700">Email Address</label>
-                      <span className="text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
-                        Trip Receipts
-                      </span>
+                      {profileEmail.trim().toLowerCase() !== (currentUser.email || '').trim().toLowerCase() && profileEmail.trim() ? (
+                        <span className="text-[10px] text-amber-700 font-bold bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
+                          Requires Email OTP
+                        </span>
+                      ) : currentUser.email ? (
+                        <span className="text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                          Verified ✓
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-slate-500 font-medium bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                          Optional
+                        </span>
+                      )}
                     </div>
                     <input
                       type="email"
@@ -6791,7 +6812,95 @@ export default function Home() {
         </div>
       )}
 
-      {/* MODAL 7: INSTALL APP / APK DOWNLOAD & UPDATE GUIDE */}
+      {/* MODAL 6.5: PROFILE CREDENTIAL OTP VERIFICATION MODAL (OPTION A) */}
+      {profileOtpModal && (
+        <div className="fixed inset-0 z-60 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white w-full max-w-md rounded-2xl sm:rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-200">
+            <div className="text-center space-y-1.5">
+              <div className="w-13 h-13 rounded-2xl bg-emerald-50 text-emerald-700 text-3xl flex items-center justify-center mx-auto border border-emerald-200/80 shadow-2xs">
+                {profileOtpModal.type === 'PHONE' ? '📱' : '✉️'}
+              </div>
+              <h3 className="text-base font-black text-slate-900">
+                {profileOtpModal.type === 'PHONE' ? 'Verify New Mobile Number' : 'Verify New Email Address'}
+              </h3>
+              <p className="text-xs text-slate-500">
+                For account safety, enter the 6-digit verification code sent to:
+              </p>
+              <div className="inline-block bg-emerald-50 text-emerald-900 font-mono font-black text-xs px-3.5 py-1 rounded-full border border-emerald-200">
+                {profileOtpModal.displayTarget}
+              </div>
+            </div>
+
+            <form onSubmit={handleVerifyProfileOtp} className="space-y-4 pt-1">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1.5 text-center">
+                  6-Digit Verification Code
+                </label>
+                <input
+                  type="text"
+                  maxLength={6}
+                  required
+                  autoFocus
+                  inputMode="numeric"
+                  value={profileOtpModal.code}
+                  onChange={(e) =>
+                    setProfileOtpModal((prev) => (prev ? { ...prev, code: e.target.value.replace(/\D/g, '') } : null))
+                  }
+                  placeholder="• • • • • •"
+                  className="w-full text-center tracking-[0.5em] text-2xl font-mono font-black py-2.5 bg-slate-50 border-2 border-emerald-500/60 rounded-xl focus:outline-none focus:border-emerald-600 focus:bg-white transition"
+                />
+              </div>
+
+              {profileOtpModal.error && (
+                <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 font-bold flex items-center gap-2">
+                  <span>⚠️</span>
+                  <span>{profileOtpModal.error}</span>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between text-xs pt-1">
+                <button
+                  type="button"
+                  onClick={handleResendProfileOtp}
+                  disabled={profileOtpModal.resendCountdown > 0 || profileOtpModal.isSending}
+                  className="font-bold text-emerald-700 hover:text-emerald-800 disabled:text-slate-400 cursor-pointer disabled:cursor-not-allowed"
+                >
+                  {profileOtpModal.resendCountdown > 0
+                    ? `Resend in ${profileOtpModal.resendCountdown}s`
+                    : profileOtpModal.isSending
+                    ? 'Sending...'
+                    : 'Resend Code'}
+                </button>
+                <span className="text-[11px] text-slate-400">Valid for 10 mins</span>
+              </div>
+
+              <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setProfileOtpModal(null)}
+                  className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-2.5 rounded-xl transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={profileOtpModal.isVerifying || profileOtpModal.code.length < 6}
+                  className="flex-1 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs py-2.5 rounded-xl transition shadow-xs cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5"
+                >
+                  {profileOtpModal.isVerifying ? (
+                    <>
+                      <span className="animate-spin text-xs">⏳</span>
+                      <span>Verifying...</span>
+                    </>
+                  ) : (
+                    <span>Confirm &amp; Update ➔</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
       {showInstallModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
           <div className="bg-white w-full max-w-lg rounded-2xl sm:rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto">
