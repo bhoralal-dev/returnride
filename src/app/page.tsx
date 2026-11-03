@@ -28,6 +28,11 @@ import type {
   DriverOffer,
 } from '@/types';
 
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+}
+
 interface City {
   id: string;
   name: string;
@@ -413,6 +418,11 @@ export default function Home() {
   // Filter Chips
   const [activeTagFilter, setActiveTagFilter] = useState<'ALL' | 'KHALI_WAPSI' | 'FAMILY' | 'MAX_2_BACK' | 'LADIES_ONLY'>('ALL');
 
+  // PWA & Mobile App / APK Installation State
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [isAppInstalled, setIsAppInstalled] = useState<boolean>(false);
+  const [showInstallModal, setShowInstallModal] = useState<boolean>(false);
+
   // Authentication State (Unified Email/Phone + Ref Design UX)
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authTab, setAuthTab] = useState<'SIGNIN' | 'SIGNUP'>('SIGNIN');
@@ -567,7 +577,7 @@ export default function Home() {
   };
 
   // Persistent helpers to keep localStorage, BroadcastChannel, and React state synchronized
-  const saveCurrentUser = (user: AppUserProfile | null) => {
+  const saveCurrentUser = (user: AppUserProfile | null, broadcast: boolean = true) => {
     setCurrentUser(user);
     if (typeof window !== 'undefined') {
       try {
@@ -576,8 +586,81 @@ export default function Home() {
         } else {
           localStorage.removeItem('apnisawari_current_user_v1');
         }
+        if (broadcast && 'BroadcastChannel' in window) {
+          const bc = new BroadcastChannel('apnisawari_sync_channel');
+          bc.postMessage({ type: 'SYNC_USER', payload: user });
+          bc.close();
+        }
       } catch {}
     }
+  };
+
+  // Cross-tab synchronization handler: ensures a single browser holds one unified user account across all tabs
+  const applyCrossTabUserSync = (incomingUser: AppUserProfile | null) => {
+    setCurrentUser((prevUser) => {
+      const prevId = prevUser?.id || null;
+      const incomingId = incomingUser?.id || null;
+      const prevStr = prevUser ? JSON.stringify(prevUser) : '';
+      const incomingStr = incomingUser ? JSON.stringify(incomingUser) : '';
+
+      if (prevId === incomingId && prevStr === incomingStr) {
+        return prevUser;
+      }
+
+      if (!incomingUser) {
+        // Active account signed out in another tab
+        setShowAuthModal(false);
+        setShowProfileModal(false);
+        setShowOfferRideModal(false);
+        setShowBookingModal(false);
+        setShowPostRequestModal(false);
+        setSelectedReqForOffer(null);
+        setPortalMode('PASSENGER');
+        setActivePassengerNav('find_ride');
+        try {
+          sessionStorage.setItem('apnisawari_tab_portal_mode', 'PASSENGER');
+        } catch {}
+        if (prevUser) {
+          setNotification({
+            type: 'info',
+            title: 'Signed Out Across Browser',
+            message: 'Your account was signed out from another tab in this browser.',
+          });
+        }
+        return null;
+      }
+
+      // Account signed in or switched in another tab
+      if (prevId !== incomingId) {
+        setShowAuthModal(false);
+        setShowProfileModal(false);
+        setShowOfferRideModal(false);
+        setShowBookingModal(false);
+        setShowPostRequestModal(false);
+        setSelectedReqForOffer(null);
+        if (incomingUser.role !== 'DRIVER') {
+          setPortalMode('PASSENGER');
+          setActivePassengerNav('find_ride');
+          try {
+            sessionStorage.setItem('apnisawari_tab_portal_mode', 'PASSENGER');
+          } catch {}
+        }
+        setNotification({
+          type: 'info',
+          title: 'Account Synchronized',
+          message: `Now operating as ${incomingUser.name} across all browser tabs.`,
+        });
+      } else {
+        // Profile details were updated in another tab
+        setNotification({
+          type: 'info',
+          title: 'Profile Synchronized',
+          message: 'Profile details were updated from another tab.',
+        });
+      }
+
+      return incomingUser;
+    });
   };
 
   const saveRides = (updatedRides: Ride[], broadcastAction?: string, item?: Ride) => {
@@ -644,7 +727,6 @@ export default function Home() {
           const savedUser = JSON.parse(savedUserStr);
           if (savedUser && savedUser.id) {
             setCurrentUser(savedUser);
-            // Tab isolation: tab's own sessionStorage keeps its view independent from other tabs
             if (savedTabMode) {
               setPortalMode(savedTabMode);
             } else if (savedUser.role === 'DRIVER') {
@@ -654,9 +736,15 @@ export default function Home() {
               setPortalMode('PASSENGER');
               sessionStorage.setItem('apnisawari_tab_portal_mode', 'PASSENGER');
             }
+          } else {
+            setCurrentUser(null);
+            setPortalMode('PASSENGER');
+            sessionStorage.removeItem('apnisawari_tab_portal_mode');
           }
-        } else if (savedTabMode) {
-          setPortalMode(savedTabMode);
+        } else {
+          setCurrentUser(null);
+          setPortalMode('PASSENGER');
+          sessionStorage.removeItem('apnisawari_tab_portal_mode');
         }
 
         const savedRidesStr = localStorage.getItem('apnisawari_rides_v1');
@@ -689,14 +777,16 @@ export default function Home() {
       }
     }
 
-    // 2. Real-time Cross-Tab BroadcastChannel listener
+    // 2. Real-time Cross-Tab BroadcastChannel listener (User account + Rides + Bookings + Requests)
     let channel: BroadcastChannel | null = null;
     try {
       if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
         channel = new BroadcastChannel('apnisawari_sync_channel');
         channel.onmessage = (event) => {
           const { type, payload, item } = event.data || {};
-          if (type === 'SYNC_RIDES' && Array.isArray(payload)) {
+          if (type === 'SYNC_USER') {
+            applyCrossTabUserSync(payload as AppUserProfile | null);
+          } else if (type === 'SYNC_RIDES' && Array.isArray(payload)) {
             setRides(payload);
             if (item) {
               const oName = NATIONWIDE_CITIES.find((c) => c.id === item.originLocationId)?.name || 'Origin';
@@ -716,8 +806,14 @@ export default function Home() {
       }
     } catch {}
 
+    // 3. Fallback Cross-Tab Storage Event listener
     const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'apnisawari_rides_v1' && e.newValue) {
+      if (e.key === 'apnisawari_current_user_v1') {
+        try {
+          const incoming = e.newValue ? JSON.parse(e.newValue) : null;
+          applyCrossTabUserSync(incoming);
+        } catch {}
+      } else if (e.key === 'apnisawari_rides_v1' && e.newValue) {
         try { setRides(JSON.parse(e.newValue)); } catch {}
       } else if (e.key === 'apnisawari_bookings_v1' && e.newValue) {
         try { setBookings(JSON.parse(e.newValue)); } catch {}
@@ -727,7 +823,67 @@ export default function Home() {
     };
     window.addEventListener('storage', handleStorageChange);
 
-    // 3. Supabase Auth state checking in background (never forcibly pops modal)
+    // 4. Tab Focus & Visibility sync to ensure inactive/background tabs remain 100% unified
+    const checkAndSyncFromStorage = () => {
+      if (typeof window === 'undefined') return;
+      try {
+        const savedUserStr = localStorage.getItem('apnisawari_current_user_v1');
+        const savedUser = savedUserStr ? JSON.parse(savedUserStr) : null;
+        applyCrossTabUserSync(savedUser);
+
+        const savedRidesStr = localStorage.getItem('apnisawari_rides_v1');
+        if (savedRidesStr) {
+          const savedRides = JSON.parse(savedRidesStr);
+          if (Array.isArray(savedRides)) {
+            const savedIds = new Set(savedRides.map((r: Ride) => r.id));
+            const baseNotIncluded = INITIAL_RIDES.filter((r) => !savedIds.has(r.id));
+            setRides([...savedRides, ...baseNotIncluded]);
+          }
+        }
+        const savedBookingsStr = localStorage.getItem('apnisawari_bookings_v1');
+        if (savedBookingsStr) {
+          const savedBookings = JSON.parse(savedBookingsStr);
+          if (Array.isArray(savedBookings)) setBookings(savedBookings);
+        }
+        const savedRequestsStr = localStorage.getItem('apnisawari_requests_v1');
+        if (savedRequestsStr) {
+          const savedRequests = JSON.parse(savedRequestsStr);
+          if (Array.isArray(savedRequests)) setPassengerRequests(savedRequests);
+        }
+      } catch {}
+    };
+
+    window.addEventListener('focus', checkAndSyncFromStorage);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        checkAndSyncFromStorage();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // 5. PWA / Mobile App Install Prompt Listener
+    const handleBeforeInstall = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e as BeforeInstallPromptEvent);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+    const handleAppInstalled = () => {
+      setIsAppInstalled(true);
+      setDeferredPrompt(null);
+    };
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    if (typeof window !== 'undefined') {
+      const isStandalone =
+        window.matchMedia('(display-mode: standalone)').matches ||
+        Boolean((window.navigator as unknown as { standalone?: boolean }).standalone);
+      if (isStandalone) {
+        setIsAppInstalled(true);
+      }
+    }
+
+    // 6. Supabase Auth state checking in background (never forcibly pops modal)
     if (supabase) {
       supabase.auth.getSession().then(({ data: { session } }) => {
         if (session?.user) {
@@ -740,8 +896,10 @@ export default function Home() {
         }
       });
 
-      const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-        if (session?.user) {
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+        if (event === 'SIGNED_OUT') {
+          saveCurrentUser(null);
+        } else if (session?.user) {
           const profile = mapSupabaseUserToProfile(session.user);
           saveCurrentUser(profile);
         }
@@ -751,12 +909,20 @@ export default function Home() {
         subscription.unsubscribe();
         if (channel) channel.close();
         window.removeEventListener('storage', handleStorageChange);
+        window.removeEventListener('focus', checkAndSyncFromStorage);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+        window.removeEventListener('appinstalled', handleAppInstalled);
       };
     }
 
     return () => {
       if (channel) channel.close();
       window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('focus', checkAndSyncFromStorage);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+      window.removeEventListener('appinstalled', handleAppInstalled);
     };
   }, []);
 
@@ -778,6 +944,20 @@ export default function Home() {
         setProfileCarAc(currentUser.vehicle.hasAc ?? true);
         setProfileCarPhotoUrl(currentUser.vehicle.imageUrl || '');
       }
+    } else {
+      setProfileName('');
+      setProfilePhone('');
+      setProfileCity('Karachi');
+      setProfileEmergency('');
+      setProfileCnic('');
+      setProfileLicense('');
+      setProfileAvatarUrl('');
+      setProfileCarModel('');
+      setProfileCarPlate('');
+      setProfileCarCapacity(4);
+      setProfileCarColor('White');
+      setProfileCarAc(true);
+      setProfileCarPhotoUrl('');
     }
   }, [currentUser]);
 
@@ -2082,6 +2262,29 @@ export default function Home() {
     });
   };
 
+  // Handle PWA / Mobile App & APK Installation
+  const handleInstallClick = async () => {
+    if (deferredPrompt) {
+      try {
+        await deferredPrompt.prompt();
+        const choice = await deferredPrompt.userChoice;
+        if (choice.outcome === 'accepted') {
+          setIsAppInstalled(true);
+          setNotification({
+            type: 'success',
+            title: 'App Installed Successfully!',
+            message: 'Apni Sawari has been added to your phone home screen.',
+          });
+        }
+        setDeferredPrompt(null);
+      } catch {
+        setShowInstallModal(true);
+      }
+    } else {
+      setShowInstallModal(true);
+    }
+  };
+
   const openSawariRequestsCount = passengerRequests.filter((r) => r.status === 'OPEN').length;
 
   if (!isClientLoaded) {
@@ -2089,7 +2292,7 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50/60 text-slate-800 flex flex-col font-sans antialiased selection:bg-emerald-100 selection:text-emerald-900 pb-20 md:pb-8">
+    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans antialiased selection:bg-emerald-100 selection:text-emerald-900 pb-20 md:pb-8">
       {/* ========================================================================= */}
       {/* 1. TOP APP BAR (DESKTOP & MOBILE RESPONSIVE)                               */}
       {/* ========================================================================= */}
@@ -2267,6 +2470,20 @@ export default function Home() {
               </button>
             )}
 
+            {/* Install App / APK Button */}
+            {!isAppInstalled && (
+              <button
+                type="button"
+                onClick={handleInstallClick}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] sm:text-xs px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-full transition flex items-center gap-1 shadow-2xs cursor-pointer border border-emerald-500"
+                title="Install Apni Sawari App / APK on your phone"
+              >
+                <span>📲</span>
+                <span className="hidden xs:inline">Install App</span>
+                <span className="xs:hidden">App</span>
+              </button>
+            )}
+
             {/* User Profile Pill or Sign In / Register Buttons */}
             {currentUser ? (
               <button
@@ -2354,13 +2571,17 @@ export default function Home() {
         <div className="flex-1 flex flex-col">
           {/* Passenger Hero & Floating Horizontal Search Capsule */}
           {activePassengerNav === 'find_ride' && (
-            <section className="bg-gradient-to-b from-white via-slate-50 to-slate-50/60 pt-6 sm:pt-8 pb-8 sm:pb-10 border-b border-slate-200/70">
-              <div className="max-w-4xl mx-auto px-4 text-center space-y-1 sm:space-y-1.5 mb-5 sm:mb-6">
-                <h1 className="text-xl sm:text-3xl font-black text-slate-900 tracking-tight leading-tight">
+            <section className="relative overflow-hidden bg-gradient-to-b from-emerald-50/70 via-white to-slate-50 pt-8 sm:pt-12 pb-10 sm:pb-12 border-b border-slate-200/80">
+              <div className="max-w-4xl mx-auto px-4 text-center space-y-2 mb-6 sm:mb-8">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100/80 border border-emerald-300 text-emerald-900 text-[11px] font-bold shadow-2xs">
+                  <span>🇵🇰</span>
+                  <span>Pakistan&apos;s Verified Intercity Carpool &amp; Return Ride Network</span>
+                </div>
+                <h1 className="text-2xl sm:text-4xl font-black text-slate-950 tracking-tight leading-tight">
                   Your Pick of Verified Rides at Low Prices
                 </h1>
-                <p className="text-xs sm:text-sm text-slate-600 font-medium max-w-lg mx-auto">
-                  اپنی سواری • Reserve single seats or book the entire car with verified drivers across Pakistan.
+                <p className="text-xs sm:text-sm text-slate-600 font-medium max-w-xl mx-auto">
+                  Reserve individual seats to split fuel costs, or book the entire car with background-checked drivers. Direct cash payment upon arrival.
                 </p>
               </div>
 
@@ -2368,19 +2589,21 @@ export default function Home() {
               <div className="max-w-4xl mx-auto px-3 sm:px-4">
                 <form
                   onSubmit={handleSearchSubmit}
-                  className="bg-white shadow-lg shadow-slate-200/60 rounded-2xl md:rounded-full border border-slate-200 p-2 sm:p-2.5 flex flex-col md:flex-row items-stretch md:items-center gap-2 md:gap-1.5"
+                  className="bg-white shadow-[0_12px_40px_-10px_rgba(0,0,0,0.08)] rounded-2xl md:rounded-full border border-slate-200/90 p-2 sm:p-2.5 flex flex-col md:flex-row items-stretch md:items-center gap-2 md:gap-1"
                 >
                   {/* Leaving From */}
-                  <div className="flex-1 w-full px-3 py-2 flex items-center gap-2 hover:bg-slate-50 rounded-xl md:rounded-full transition bg-slate-50/50 md:bg-transparent">
-                    <span className="text-sm">🟢</span>
-                    <div className="w-full text-left">
+                  <div className="flex-1 w-full px-3.5 py-2.5 flex items-center gap-2.5 hover:bg-slate-50/80 rounded-xl md:rounded-full transition bg-slate-50/40 md:bg-transparent">
+                    <span className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center text-xs shrink-0 font-bold">
+                      🟢
+                    </span>
+                    <div className="w-full text-left min-w-0">
                       <label className="block text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                         Leaving From
                       </label>
                       <select
                         value={searchOrigin}
                         onChange={(e) => setSearchOrigin(e.target.value)}
-                        className="w-full bg-transparent text-xs sm:text-sm font-extrabold text-slate-900 focus:outline-none cursor-pointer"
+                        className="w-full bg-transparent text-xs sm:text-sm font-extrabold text-slate-900 focus:outline-none cursor-pointer truncate"
                       >
                         <option value="ALL">🇵🇰 All Pakistan (Any City)</option>
                         {NATIONWIDE_CITIES.map((c) => (
@@ -2393,11 +2616,11 @@ export default function Home() {
                   </div>
 
                   {/* Swap Button */}
-                  <div className="flex justify-center md:block">
+                  <div className="flex justify-center md:block shrink-0">
                     <button
                       type="button"
                       onClick={handleSwapCities}
-                      className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center shrink-0 transition cursor-pointer text-xs"
+                      className="w-8 h-8 rounded-full bg-slate-100 hover:bg-emerald-100 text-slate-600 hover:text-emerald-800 flex items-center justify-center transition cursor-pointer text-xs font-black shadow-2xs border border-slate-200"
                       title="Swap Departure and Destination"
                     >
                       ⇄
@@ -2405,16 +2628,18 @@ export default function Home() {
                   </div>
 
                   {/* Going To */}
-                  <div className="flex-1 w-full px-3 py-2 flex items-center gap-2 hover:bg-slate-50 rounded-xl md:rounded-full transition bg-slate-50/50 md:bg-transparent border-t md:border-t-0 md:border-l border-slate-200">
-                    <span className="text-sm">🔴</span>
-                    <div className="w-full text-left">
+                  <div className="flex-1 w-full px-3.5 py-2.5 flex items-center gap-2.5 hover:bg-slate-50/80 rounded-xl md:rounded-full transition bg-slate-50/40 md:bg-transparent border-t md:border-t-0 md:border-l border-slate-200/80">
+                    <span className="w-6 h-6 rounded-full bg-rose-100 text-rose-800 flex items-center justify-center text-xs shrink-0 font-bold">
+                      🔴
+                    </span>
+                    <div className="w-full text-left min-w-0">
                       <label className="block text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                         Going To
                       </label>
                       <select
                         value={searchDest}
                         onChange={(e) => setSearchDest(e.target.value)}
-                        className="w-full bg-transparent text-xs sm:text-sm font-extrabold text-slate-900 focus:outline-none cursor-pointer"
+                        className="w-full bg-transparent text-xs sm:text-sm font-extrabold text-slate-900 focus:outline-none cursor-pointer truncate"
                       >
                         <option value="ALL">🇵🇰 Anywhere in Pakistan</option>
                         {NATIONWIDE_CITIES.map((c) => (
@@ -2426,28 +2651,40 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* Date */}
-                  <div className="w-full md:w-32 px-3 py-2 flex items-center gap-2 hover:bg-slate-50 rounded-xl md:rounded-full transition bg-slate-50/50 md:bg-transparent border-t md:border-t-0 md:border-l border-slate-200 text-left">
-                    <span className="text-sm">📅</span>
-                    <div>
+                  {/* Seats */}
+                  <div className="w-full md:w-36 px-3.5 py-2.5 flex items-center gap-2 hover:bg-slate-50/80 rounded-xl md:rounded-full transition bg-slate-50/40 md:bg-transparent border-t md:border-t-0 md:border-l border-slate-200/80 text-left shrink-0">
+                    <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-800 flex items-center justify-center text-xs shrink-0 font-bold">
+                      👥
+                    </span>
+                    <div className="w-full min-w-0">
                       <label className="block text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                        Date
+                        Seats
                       </label>
-                      <span className="text-xs font-black text-slate-900 block truncate">Today</span>
+                      <select
+                        value={searchSeatsCount}
+                        onChange={(e) => setSearchSeatsCount(Number(e.target.value))}
+                        className="w-full bg-transparent text-xs font-black text-slate-900 focus:outline-none cursor-pointer"
+                      >
+                        <option value={1}>1 Seat</option>
+                        <option value={2}>2 Seats</option>
+                        <option value={3}>3 Seats</option>
+                        <option value={4}>4 Seats</option>
+                      </select>
                     </div>
                   </div>
 
                   {/* Search CTA */}
                   <button
                     type="submit"
-                    className="w-full md:w-auto bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs sm:text-xs px-6 py-3 sm:py-3.5 rounded-xl md:rounded-full shadow-xs transition flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+                    className="w-full md:w-auto bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs sm:text-sm px-6 py-3 sm:py-3.5 rounded-xl md:rounded-full shadow-xs transition flex items-center justify-center gap-2 cursor-pointer shrink-0"
                   >
-                    <span>Find a Ride</span>
+                    <span>🔍</span>
+                    <span>Find Rides</span>
                   </button>
                 </form>
 
                 {/* Popular Route Shortcuts (Horizontally Scrollable on Mobile) */}
-                <div className="mt-3 flex items-center justify-start sm:justify-center overflow-x-auto gap-1.5 text-xs pb-1 scrollbar-none">
+                <div className="mt-3.5 flex items-center justify-start sm:justify-center overflow-x-auto gap-1.5 text-xs pb-1 scrollbar-none">
                   <span className="text-[10px] sm:text-[11px] text-slate-400 font-bold uppercase shrink-0">Popular:</span>
                   <button
                     type="button"
@@ -2456,7 +2693,11 @@ export default function Home() {
                       setSearchDest('ALL');
                       setHasSearched(true);
                     }}
-                    className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-full transition font-extrabold cursor-pointer shrink-0 text-[11px] flex items-center gap-1"
+                    className={`px-3 py-1 rounded-full transition font-extrabold cursor-pointer shrink-0 text-[11px] flex items-center gap-1 border ${
+                      searchOrigin === 'ALL' && searchDest === 'ALL'
+                        ? 'bg-emerald-700 text-white border-emerald-700 shadow-2xs'
+                        : 'bg-white hover:bg-emerald-50 text-slate-700 border-slate-200'
+                    }`}
                   >
                     <span>🇵🇰</span>
                     <span>All Pakistan Rides</span>
@@ -2468,7 +2709,11 @@ export default function Home() {
                       setSearchDest('loc-khi');
                       setHasSearched(true);
                     }}
-                    className="px-2.5 py-1 bg-white hover:bg-emerald-50 hover:text-emerald-900 text-slate-700 rounded-full border border-slate-200 transition font-bold cursor-pointer shrink-0 text-[11px]"
+                    className={`px-3 py-1 rounded-full transition font-bold cursor-pointer shrink-0 text-[11px] border ${
+                      searchOrigin === 'loc-mpk' && searchDest === 'loc-khi'
+                        ? 'bg-emerald-700 text-white border-emerald-700 shadow-2xs'
+                        : 'bg-white hover:bg-emerald-50 text-slate-700 border-slate-200'
+                    }`}
                   >
                     Mirpur Khas ➔ Karachi
                   </button>
@@ -2479,7 +2724,11 @@ export default function Home() {
                       setSearchDest('loc-khi');
                       setHasSearched(true);
                     }}
-                    className="px-2.5 py-1 bg-white hover:bg-emerald-50 hover:text-emerald-900 text-slate-700 rounded-full border border-slate-200 transition font-bold cursor-pointer shrink-0 text-[11px]"
+                    className={`px-3 py-1 rounded-full transition font-bold cursor-pointer shrink-0 text-[11px] border ${
+                      searchOrigin === 'loc-uk' && searchDest === 'loc-khi'
+                        ? 'bg-emerald-700 text-white border-emerald-700 shadow-2xs'
+                        : 'bg-white hover:bg-emerald-50 text-slate-700 border-slate-200'
+                    }`}
                   >
                     Umerkot ➔ Karachi
                   </button>
@@ -2490,7 +2739,11 @@ export default function Home() {
                       setSearchDest('loc-pesh');
                       setHasSearched(true);
                     }}
-                    className="px-2.5 py-1 bg-white hover:bg-emerald-50 hover:text-emerald-900 text-slate-700 rounded-full border border-slate-200 transition font-bold cursor-pointer shrink-0 text-[11px]"
+                    className={`px-3 py-1 rounded-full transition font-bold cursor-pointer shrink-0 text-[11px] border ${
+                      searchOrigin === 'loc-fsd' && searchDest === 'loc-pesh'
+                        ? 'bg-emerald-700 text-white border-emerald-700 shadow-2xs'
+                        : 'bg-white hover:bg-emerald-50 text-slate-700 border-slate-200'
+                    }`}
                   >
                     Faisalabad ➔ Peshawar
                   </button>
@@ -2501,7 +2754,11 @@ export default function Home() {
                       setSearchDest('loc-hyd');
                       setHasSearched(true);
                     }}
-                    className="px-2.5 py-1 bg-white hover:bg-emerald-50 hover:text-emerald-900 text-slate-700 rounded-full border border-slate-200 transition font-bold cursor-pointer shrink-0 text-[11px]"
+                    className={`px-3 py-1 rounded-full transition font-bold cursor-pointer shrink-0 text-[11px] border ${
+                      searchOrigin === 'loc-khi' && searchDest === 'loc-hyd'
+                        ? 'bg-emerald-700 text-white border-emerald-700 shadow-2xs'
+                        : 'bg-white hover:bg-emerald-50 text-slate-700 border-slate-200'
+                    }`}
                   >
                     Karachi ➔ Hyderabad
                   </button>
@@ -2512,7 +2769,11 @@ export default function Home() {
                       setSearchDest('loc-isb');
                       setHasSearched(true);
                     }}
-                    className="px-2.5 py-1 bg-white hover:bg-emerald-50 hover:text-emerald-900 text-slate-700 rounded-full border border-slate-200 transition font-bold cursor-pointer shrink-0 text-[11px]"
+                    className={`px-3 py-1 rounded-full transition font-bold cursor-pointer shrink-0 text-[11px] border ${
+                      searchOrigin === 'loc-lhr' && searchDest === 'loc-isb'
+                        ? 'bg-emerald-700 text-white border-emerald-700 shadow-2xs'
+                        : 'bg-white hover:bg-emerald-50 text-slate-700 border-slate-200'
+                    }`}
                   >
                     Lahore ➔ Islamabad
                   </button>
@@ -2523,7 +2784,11 @@ export default function Home() {
                       setSearchDest('loc-lhr');
                       setHasSearched(true);
                     }}
-                    className="px-2.5 py-1 bg-white hover:bg-emerald-50 hover:text-emerald-900 text-slate-700 rounded-full border border-slate-200 transition font-bold cursor-pointer shrink-0 text-[11px]"
+                    className={`px-3 py-1 rounded-full transition font-bold cursor-pointer shrink-0 text-[11px] border ${
+                      searchOrigin === 'loc-mul' && searchDest === 'loc-lhr'
+                        ? 'bg-emerald-700 text-white border-emerald-700 shadow-2xs'
+                        : 'bg-white hover:bg-emerald-50 text-slate-700 border-slate-200'
+                    }`}
                   >
                     Multan ➔ Lahore
                   </button>
@@ -2640,125 +2905,178 @@ export default function Home() {
                       return (
                         <div
                           key={ride.id}
-                          className="bg-white rounded-2xl border border-slate-200/90 hover:border-slate-300 p-4 sm:p-5 transition shadow-2xs hover:shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 sm:gap-4 overflow-hidden"
+                          className="bg-white rounded-2xl border border-slate-200/90 hover:border-emerald-300 hover:shadow-md transition-all duration-200 overflow-hidden"
                         >
-                          {/* Driver Info Row */}
-                          <div className="flex items-center gap-3 shrink-0 md:w-52">
-                            <div className="relative shrink-0">
-                              <span className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-lg sm:text-xl">
-                                👨‍✈️
-                              </span>
-                              <span
-                                className="absolute -bottom-1 -right-1 bg-emerald-600 text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-bold"
-                                title="Verified Driver"
-                              >
-                                ✓
-                              </span>
-                            </div>
-
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className="font-extrabold text-xs sm:text-sm text-slate-900 truncate">
-                                  {ride.driverName || 'Verified Captain'}
-                                </span>
-                                <span className="text-[10px] font-black text-amber-900 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200 shrink-0">
-                                  ★ {ride.driverTier === 'TOP_RATED_DRIVER' ? '4.9' : '4.8'}
+                          {/* 1. Header: Driver Details, Vehicle, Rating & Comfort Ribbon */}
+                          <div className="p-4 sm:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-3.5 border-b border-slate-100">
+                            {/* Driver Profile & Vehicle */}
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className="relative shrink-0">
+                                <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-xl shadow-2xs">
+                                  👨‍✈️
+                                </div>
+                                <span
+                                  className="absolute -bottom-0.5 -right-0.5 bg-emerald-600 text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-bold ring-2 ring-white"
+                                  title="Verified Driver"
+                                >
+                                  ✓
                                 </span>
                               </div>
-                              {ride.originLocationId === userCityId && (
-                                <div className="mt-0.5">
-                                  <span className="text-[9px] font-black text-emerald-800 bg-emerald-100 px-1.5 py-0.2 rounded-full border border-emerald-300 inline-block">
-                                    📍 Near You ({oName})
+
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-extrabold text-sm text-slate-900 truncate">
+                                    {ride.driverName || 'Verified Captain'}
                                   </span>
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-black text-amber-900 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                                    ★ {ride.driverTier === 'TOP_RATED_DRIVER' ? '4.9' : '4.8'}
+                                  </span>
+                                  {ride.originLocationId === userCityId && (
+                                    <span className="text-[10px] font-black text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
+                                      📍 Near You ({oName})
+                                    </span>
+                                  )}
                                 </div>
-                              )}
-                              <span className="text-[10px] sm:text-[11px] text-slate-500 font-medium block truncate mt-0.5">
-                                {ride.vehicleMakeModel || 'Standard Car'} {ride.vehicleColor ? `• ${ride.vehicleColor}` : ''}
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* Center Column: Route & Travel Comfort Tags (min-w-0 is required for flex truncate) */}
-                          <div className="flex-1 min-w-0 space-y-1.5 sm:space-y-2">
-                            {/* Schedule Timeline */}
-                            <div className="flex items-center gap-1.5 sm:gap-2 text-xs font-bold text-slate-900 flex-wrap">
-                              <span className="text-emerald-950 font-black">{timeStr}</span>
-                              <span className="text-slate-500 font-normal">({oName})</span>
-                              <span className="text-emerald-600 font-black">➔</span>
-                              <span className="text-emerald-950 font-black">{dName}</span>
-                              {dateStr && (
-                                <span className="text-[10px] text-slate-400 font-medium ml-1">
-                                  • {dateStr}
-                                </span>
-                              )}
+                                <p className="text-xs text-slate-500 font-medium truncate mt-0.5">
+                                  🚘 {ride.vehicleMakeModel || 'Standard Sedan'} {ride.vehicleColor ? `• ${ride.vehicleColor}` : ''} {ride.vehiclePlate ? `• [${ride.vehiclePlate}]` : ''}
+                                </p>
+                              </div>
                             </div>
 
-                            {/* Waypoint Dropoffs */}
-                            {ride.routeStops && ride.routeStops.length > 0 && (
-                              <p
-                                className="text-[10px] sm:text-[11px] text-slate-500 font-medium truncate"
-                                title={ride.routeStops.map((s) => s.name).join(' • ')}
-                              >
-                                Stops: {ride.routeStops.map((s) => s.name).join(' • ')}
-                              </p>
-                            )}
-
-                            {/* Comfort Tags */}
-                            <div className="flex items-center flex-wrap gap-1 text-[10px] sm:text-[11px]">
+                            {/* Comfort & Policy Badges */}
+                            <div className="flex items-center flex-wrap gap-1.5">
                               {ride.travelComfort?.acType === 'CHILLED_AC' && (
-                                <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md font-semibold">
+                                <span className="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-slate-200/60 inline-flex items-center gap-1">
                                   ❄️ Chilled AC
                                 </span>
                               )}
                               {ride.travelComfort?.familyOnboard && (
-                                <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-md font-semibold">
+                                <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-2.5 py-1 rounded-lg text-[11px] font-semibold inline-flex items-center gap-1">
                                   👨‍👩‍👧 Family Onboard
                                 </span>
                               )}
                               {ride.travelComfort?.maxInBack === 2 && (
-                                <span className="bg-blue-50 text-blue-800 border border-blue-200 px-2 py-0.5 rounded-md font-semibold">
+                                <span className="bg-blue-50 text-blue-800 border border-blue-200 px-2.5 py-1 rounded-lg text-[11px] font-semibold inline-flex items-center gap-1">
                                   🛋️ Max 2 in Back
                                 </span>
                               )}
                               {ride.travelComfort?.tollsIncluded && (
-                                <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md font-semibold">
+                                <span className="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-slate-200/60 inline-flex items-center gap-1">
                                   ✅ Tolls Included
                                 </span>
                               )}
                               {ride.isReturnDeal && (
-                                <span className="bg-rose-50 text-rose-800 border border-rose-200 px-2 py-0.5 rounded-md font-bold">
+                                <span className="bg-rose-50 text-rose-800 border border-rose-200 px-2.5 py-1 rounded-lg text-[11px] font-bold inline-flex items-center gap-1">
                                   🏷️ Khali Wapsi Deal
                                 </span>
                               )}
                             </div>
                           </div>
 
-                          {/* Right Column: Pricing & Book CTA with Fixed Width and Clean Left Divider */}
-                          <div className="w-full md:w-36 shrink-0 flex items-center md:flex-col justify-between md:justify-center border-t md:border-t-0 pt-2.5 md:pt-0 border-slate-100 gap-2 md:pl-4 md:border-l md:border-slate-100">
-                            <div className="text-left md:text-right w-full">
-                              <span className="text-[10px] sm:text-xs text-slate-400 font-bold block">Per Seat</span>
-                              <div className="flex items-baseline md:justify-end gap-1">
-                                <span className="text-base sm:text-xl font-black text-slate-900">
-                                  Rs. {ride.seatPrice?.toLocaleString()}
-                                </span>
+                          {/* 2. Middle: Visual Route Journey Timeline Track */}
+                          <div className="p-4 sm:p-5 bg-gradient-to-r from-slate-50/60 via-white to-slate-50/40">
+                            <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
+                              {/* Departure Point */}
+                              <div className="md:col-span-4 flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center font-black text-xs shrink-0">
+                                  🟢
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-base sm:text-lg font-black text-slate-900">{timeStr}</span>
+                                    {dateStr && (
+                                      <span className="text-[11px] text-slate-500 font-bold bg-slate-100 px-1.5 py-0.5 rounded">
+                                        {dateStr}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <span className="text-xs font-bold text-slate-700 block">{oName}</span>
+                                </div>
                               </div>
-                              <span className="text-[10px] sm:text-[11px] font-bold text-emerald-700 block">
-                                {isFull ? 'Sold Out' : `${availableSeats} of ${ride.capacity} seats left`}
+
+                              {/* Highway / Waypoint Track */}
+                              <div className="md:col-span-4 flex flex-col items-center justify-center px-2 py-1">
+                                <div className="w-full flex items-center justify-center gap-1.5 text-xs text-slate-400">
+                                  <span className="h-0.5 flex-1 bg-slate-200 rounded"></span>
+                                  <span className="text-xs">🚗</span>
+                                  <span className="h-0.5 flex-1 bg-slate-200 rounded"></span>
+                                </div>
+                                {ride.routeStops && ride.routeStops.length > 0 ? (
+                                  <span
+                                    className="text-[10px] text-slate-500 font-medium text-center truncate max-w-full mt-1"
+                                    title={ride.routeStops.map((s) => s.name).join(' ➔ ')}
+                                  >
+                                    Via: {ride.routeStops.map((s) => s.name).join(', ')}
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] text-emerald-700 font-bold text-center mt-1">
+                                    Direct Express Highway
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Destination Point */}
+                              <div className="md:col-span-4 flex items-center md:justify-end gap-3">
+                                <div className="text-left md:text-right">
+                                  <span className="text-base sm:text-lg font-black text-slate-900 block">Arrival</span>
+                                  <span className="text-xs font-bold text-slate-700 block">{dName}</span>
+                                </div>
+                                <div className="w-8 h-8 rounded-full bg-rose-100 text-rose-800 flex items-center justify-center font-black text-xs shrink-0 order-first md:order-last">
+                                  🔴
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* 3. Bottom Ticket Stub: Seat Availability, Payment Method & Booking Action */}
+                          <div className="px-4 sm:px-5 py-3 sm:py-3.5 bg-slate-50 border-t border-slate-200/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                            {/* Availability & Payment Notice */}
+                            <div className="flex items-center gap-3 flex-wrap">
+                              <span
+                                className={`inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full ${
+                                  isFull
+                                    ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                                    : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                }`}
+                              >
+                                <span className={`w-2 h-2 rounded-full ${isFull ? 'bg-rose-500' : 'bg-emerald-500 animate-pulse'}`}></span>
+                                {isFull ? 'Fully Booked' : `${availableSeats} of ${ride.capacity} seats left`}
+                              </span>
+                              <span className="text-xs text-slate-500 font-medium hidden xs:inline">
+                                💵 Pay Direct Cash to Driver on boarding
                               </span>
                             </div>
 
-                            <button
-                              type="button"
-                              onClick={() => handleSelectRideForBooking(ride)}
-                              disabled={isFull}
-                              className={`w-full sm:w-auto md:w-full px-4 sm:px-5 py-2 sm:py-2.5 rounded-full font-bold text-xs transition cursor-pointer shadow-xs text-center ${
-                                isFull
-                                  ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                                  : 'bg-emerald-700 hover:bg-emerald-800 text-white'
-                              }`}
-                            >
-                              {isFull ? 'Fully Booked' : 'Book Seat'}
-                            </button>
+                            {/* Price & Book Action CTA */}
+                            <div className="flex items-center justify-between sm:justify-end gap-4 w-full sm:w-auto">
+                              <div className="text-left sm:text-right">
+                                <div className="flex items-baseline sm:justify-end gap-1">
+                                  <span className="text-xs text-slate-400 font-bold">Rs.</span>
+                                  <span className="text-lg sm:text-xl font-black text-slate-900">
+                                    {ride.seatPrice?.toLocaleString()}
+                                  </span>
+                                  <span className="text-[11px] text-slate-500 font-medium">/ seat</span>
+                                </div>
+                                {ride.wholeCarPrice && ride.bookingMode === 'WHOLE_CAR_OR_SEATS' && (
+                                  <span className="text-[10px] text-slate-500 font-semibold block">
+                                    or Rs. {ride.wholeCarPrice.toLocaleString()} full car
+                                  </span>
+                                )}
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => handleSelectRideForBooking(ride)}
+                                disabled={isFull}
+                                className={`px-5 py-2.5 rounded-full font-black text-xs transition cursor-pointer shadow-sm text-center shrink-0 ${
+                                  isFull
+                                    ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
+                                    : 'bg-emerald-700 hover:bg-emerald-800 text-white'
+                                }`}
+                              >
+                                {isFull ? 'Sold Out' : 'Book Seat ➔'}
+                              </button>
+                            </div>
                           </div>
                         </div>
                       );
@@ -3992,6 +4310,18 @@ export default function Home() {
               <span className="text-base">{currentUser ? (currentUser.avatarUrl || '🧑') : '👤'}</span>
               <span className="text-[10px] mt-0.5">{currentUser ? 'Profile' : 'Sign In'}</span>
             </button>
+
+            {!isAppInstalled && (
+              <button
+                type="button"
+                onClick={handleInstallClick}
+                className="flex flex-col items-center justify-center p-1 rounded-xl transition cursor-pointer text-emerald-700 font-bold"
+                title="Install App"
+              >
+                <span className="text-base">📲</span>
+                <span className="text-[10px] mt-0.5">App</span>
+              </button>
+            )}
           </>
         ) : (
           /* DRIVER MOBILE BOTTOM NAV */
@@ -4066,6 +4396,18 @@ export default function Home() {
               <span className="text-base">{currentUser ? (currentUser.avatarUrl || '🧑') : '👤'}</span>
               <span className="text-[10px] mt-0.5">{currentUser ? 'Profile' : 'Sign In'}</span>
             </button>
+
+            {!isAppInstalled && (
+              <button
+                type="button"
+                onClick={handleInstallClick}
+                className="flex flex-col items-center justify-center p-1 rounded-xl transition cursor-pointer text-emerald-700 font-bold"
+                title="Install App"
+              >
+                <span className="text-base">📲</span>
+                <span className="text-[10px] mt-0.5">App</span>
+              </button>
+            )}
           </>
         )}
       </div>
@@ -5493,6 +5835,123 @@ export default function Home() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 7: INSTALL APP / APK DOWNLOAD & UPDATE GUIDE */}
+      {showInstallModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white w-full max-w-lg rounded-2xl sm:rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <span className="w-10 h-10 rounded-2xl bg-emerald-700 text-white flex items-center justify-center text-xl shadow-xs">
+                  📲
+                </span>
+                <div>
+                  <h3 className="text-base font-black text-slate-900">Install Apni Sawari App</h3>
+                  <p className="text-xs text-slate-500">Android APK &amp; Mobile Web App Guide</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowInstallModal(false)}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center text-sm font-bold cursor-pointer transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Direct 1-Tap Install Button if Browser Supports it */}
+            {deferredPrompt && (
+              <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-200 flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs font-black text-emerald-950">1-Tap Fast Installation</div>
+                  <div className="text-[11px] text-emerald-700">Add directly to your Android home screen as a native WebAPK.</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await deferredPrompt.prompt();
+                    const choice = await deferredPrompt.userChoice;
+                    if (choice.outcome === 'accepted') {
+                      setIsAppInstalled(true);
+                      setShowInstallModal(false);
+                      setNotification({
+                        type: 'success',
+                        title: 'App Installed!',
+                        message: 'Apni Sawari has been installed on your phone home screen.',
+                      });
+                    }
+                    setDeferredPrompt(null);
+                  }}
+                  className="bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs px-4 py-2 rounded-xl transition shadow-xs cursor-pointer whitespace-nowrap"
+                >
+                  Install Now
+                </button>
+              </div>
+            )}
+
+            {/* Step-by-Step Installation Tabs */}
+            <div className="space-y-3">
+              {/* Android Instructions */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+                <div className="flex items-center gap-2 text-xs font-bold text-slate-900">
+                  <span className="text-base">🤖</span>
+                  <span>Android Installation (Google Chrome)</span>
+                </div>
+                <ol className="text-xs text-slate-600 space-y-1.5 list-decimal pl-4">
+                  <li>Open this website in <strong>Google Chrome</strong> on your mobile phone.</li>
+                  <li>Tap the <strong>3 vertical dots (⋮)</strong> in the top-right corner of Chrome.</li>
+                  <li>Tap <strong>&quot;Install App&quot;</strong> or <strong>&quot;Add to Home screen&quot;</strong>.</li>
+                  <li>The app will automatically install with the official icon and title <strong>&quot;Apni Sawari&quot;</strong>.</li>
+                </ol>
+              </div>
+
+              {/* APK Name & Auto-Update Guide */}
+              <div className="p-3.5 rounded-2xl bg-amber-50/80 border border-amber-200 space-y-2">
+                <div className="flex items-center gap-2 text-xs font-bold text-amber-950">
+                  <span className="text-base">🔄</span>
+                  <span>Purana Name / APK Update Kaise Hoga?</span>
+                </div>
+                <div className="text-xs text-amber-900 space-y-1.5">
+                  <p>
+                    <strong>Aapke phone me purana naam kyun aa raha hai?</strong> Android OS installed app ka naam aur icon phone ki storage me cache kar leta hai. Direct APKs bina store ke background me auto-update nahi hotin.
+                  </p>
+                  <div className="p-2.5 bg-white/80 rounded-xl border border-amber-200">
+                    <p className="font-bold text-amber-950 mb-1">⚡ 10-Second Quick Update Step:</p>
+                    <ol className="list-decimal pl-4 space-y-1 text-[11px] text-amber-900">
+                      <li>Phone ki screen par purani app icon par long-press karke <strong>&quot;Uninstall&quot;</strong> kar dein.</li>
+                      <li>Chrome browser me site ko open karein aur dobara <strong>&quot;Install App&quot;</strong> par tap karein.</li>
+                      <li>Aapke phone par foran naya naam <strong>&quot;Apni Sawari&quot;</strong> aur naya updated logo lag jayega!</li>
+                    </ol>
+                  </div>
+                </div>
+              </div>
+
+              {/* iOS / iPhone Instructions */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+                <div className="flex items-center gap-2 text-xs font-bold text-slate-900">
+                  <span className="text-base">🍎</span>
+                  <span>Apple iPhone / iOS (Safari)</span>
+                </div>
+                <ol className="text-xs text-slate-600 space-y-1 list-decimal pl-4">
+                  <li>Open in <strong>Safari</strong> on iPhone.</li>
+                  <li>Tap the <strong>Share</strong> button (square icon with arrow pointing up).</li>
+                  <li>Scroll down and tap <strong>&quot;Add to Home Screen&quot;</strong>.</li>
+                </ol>
+              </div>
+            </div>
+
+            <div className="pt-2 border-t border-slate-100 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowInstallModal(false)}
+                className="bg-slate-900 hover:bg-black text-white font-bold text-xs px-5 py-2.5 rounded-full transition cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

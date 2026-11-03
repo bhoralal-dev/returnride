@@ -1,0 +1,16 @@
+{
+  "appId": "pk.apnisawari.app",
+  "appName": "Apni Sawari",
+  "webDir": ".next",
+  "bundledWebRuntime": false,
+  "server": {
+    "url": "https://returnride-delta.vercel.app",
+    "cleartext": false,
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false
+  }
+}

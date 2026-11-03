@@ -16,9 +16,19 @@ export const metadata: Metadata = {
   title: "Apni Sawari - Pakistan's Nationwide Intercity Ride Network",
   description: "Apni Sawari (اپنی سواری) - Pakistan's trusted intercity travel network. Reserve whole cars, book individual seats, find Khali Wapsi deals, and post ride requests across Pakistan with direct cash payment.",
   manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Apni Sawari",
+  },
 };
 
 export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: "cover",
   themeColor: "#065f46",
 };
 
