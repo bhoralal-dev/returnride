@@ -21,7 +21,9 @@ import type {
 } from '@/types/reliability';
 import type {
   Ride,
+  RideStatus,
   BookingRequest,
+  BookingStatus,
   BookingType,
   RideBookingMode,
   PassengerRideRequest,
@@ -587,6 +589,30 @@ export default function Home() {
   const [profileCarAc, setProfileCarAc] = useState(true);
   const [profileCarPhotoUrl, setProfileCarPhotoUrl] = useState('');
 
+  // Profile Credential OTP Verification (Option A: verify new Phone or Email with OTP before saving)
+  const [profileOtpModal, setProfileOtpModal] = useState<{
+    type: 'PHONE' | 'EMAIL';
+    targetValue: string;
+    displayTarget: string;
+    token: string;
+    code: string;
+    isSending: boolean;
+    isVerifying: boolean;
+    error: string | null;
+    resendCountdown: number;
+  } | null>(null);
+
+  // Resend Countdown for Profile OTP
+  useEffect(() => {
+    if (!profileOtpModal || profileOtpModal.resendCountdown <= 0) return;
+    const timer = setInterval(() => {
+      setProfileOtpModal((prev) =>
+        prev && prev.resendCountdown > 0 ? { ...prev, resendCountdown: prev.resendCountdown - 1 } : prev
+      );
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [profileOtpModal?.resendCountdown]);
+
   // Notification Toast
   const [notification, setNotification] = useState<{
     type: 'success' | 'error' | 'info';
@@ -618,6 +644,163 @@ export default function Home() {
 
   // Safety & Emergency SOS Shield State
   const [showSosModal, setShowSosModal] = useState<boolean>(false);
+
+  // Auto-scroll chat to latest message
+  useEffect(() => {
+    if (showChatModal && chatMessagesEndRef.current) {
+      chatMessagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [chatMessages, showChatModal]);
+
+  // In-App Call Simulation & Duration Timer
+  useEffect(() => {
+    let callTimer: NodeJS.Timeout | null = null;
+    let ringTimeout: NodeJS.Timeout | null = null;
+
+    if (activeCall && activeCall.status === 'RINGING') {
+      ringTimeout = setTimeout(() => {
+        setActiveCall((prev) => (prev && prev.status === 'RINGING' ? { ...prev, status: 'CONNECTED' } : prev));
+      }, 2500);
+    } else if (activeCall && activeCall.status === 'CONNECTED') {
+      callTimer = setInterval(() => {
+        setActiveCall((prev) => (prev && prev.status === 'CONNECTED' ? { ...prev, durationSec: prev.durationSec + 1 } : prev));
+      }, 1000);
+    }
+
+    return () => {
+      if (callTimer) clearInterval(callTimer);
+      if (ringTimeout) clearTimeout(ringTimeout);
+    };
+  }, [activeCall?.status]);
+
+  // In-App Chat Persistence & Broadcast Helper
+  const saveChatMessages = (updated: ChatMessage[]) => {
+    setChatMessages(updated);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('apnisawari_chat_messages_v1', JSON.stringify(updated));
+        if ('BroadcastChannel' in window) {
+          const bc = new BroadcastChannel('apnisawari_sync_channel');
+          bc.postMessage({ type: 'SYNC_CHAT', payload: updated });
+          bc.close();
+        }
+      } catch {}
+    }
+  };
+
+  const handleSendChatMessage = (textOverride?: string) => {
+    const raw = (textOverride !== undefined ? textOverride : chatInputText).trim();
+    if (!raw || !activeChatBooking) return;
+
+    const newMsg: ChatMessage = {
+      id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      bookingId: activeChatBooking.bookingId,
+      senderId: currentUser?.id || 'guest',
+      senderName: currentUser?.name || (activeChatBooking.peerRole === 'Captain' ? 'Passenger' : 'Captain'),
+      senderRole: activeChatBooking.peerRole === 'Captain' ? 'PASSENGER' : 'DRIVER',
+      text: raw,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+
+    saveChatMessages([...chatMessages, newMsg]);
+    setChatInputText('');
+  };
+
+  const handleShareCurrentLocation = () => {
+    if (!activeChatBooking) return;
+    if (typeof window === 'undefined' || !navigator.geolocation) {
+      setNotification({
+        type: 'error',
+        title: 'GPS Unavailable',
+        message: 'Location services are not supported by this browser.',
+      });
+      return;
+    }
+
+    setIsSharingLocation(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = Number(pos.coords.latitude.toFixed(6));
+        const lng = Number(pos.coords.longitude.toFixed(6));
+        const mapUrl = 'https://www.google.com/maps?q=' + lat + ',' + lng;
+
+        const locMsg: ChatMessage = {
+          id: 'loc_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+          bookingId: activeChatBooking.bookingId,
+          senderId: currentUser?.id || 'guest',
+          senderName: currentUser?.name || (activeChatBooking.peerRole === 'Captain' ? 'Passenger' : 'Captain'),
+          senderRole: activeChatBooking.peerRole === 'Captain' ? 'PASSENGER' : 'DRIVER',
+          location: {
+            lat,
+            lng,
+            mapUrl,
+            address: 'Live Location Pin (' + lat + ', ' + lng + ')',
+          },
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+
+        saveChatMessages([...chatMessages, locMsg]);
+        setIsSharingLocation(false);
+        setNotification({
+          type: 'success',
+          title: 'Location Shared',
+          message: 'Your exact GPS location has been sent to the chat.',
+        });
+      },
+      () => {
+        setIsSharingLocation(false);
+        setNotification({
+          type: 'info',
+          title: 'Location Permission',
+          message: 'Unable to retrieve GPS coordinate. You can still message your landmark.',
+        });
+      },
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  };
+
+  // Safe Journey Completion with Anti-Fraud Checks
+  const handleConfirmCompleteJourney = () => {
+    if (!showCompleteRideModal) return;
+    const b = showCompleteRideModal;
+
+    const updatedBookings = bookings.map((item) =>
+      item.id === b.id ? { ...item, status: 'COMPLETED' as BookingStatus, updatedAt: new Date().toISOString() } : item
+    );
+    saveBookings(updatedBookings);
+
+    // If whole car or last accepted booking, mark ride completed
+    const ride = rides.find((r) => r.id === b.rideId);
+    if (ride) {
+      const remainingAccepted = updatedBookings.filter(
+        (x) => x.rideId === b.rideId && x.status === 'ACCEPTED' && x.id !== b.id
+      );
+      if (remainingAccepted.length === 0 || b.bookingType === 'WHOLE_CAR') {
+        const updatedRides = rides.map((r) =>
+          r.id === b.rideId ? { ...r, status: 'COMPLETED' as RideStatus } : r
+        );
+        saveRides(updatedRides);
+      }
+    }
+
+    // Broadcast TRIP_COMPLETED event across all tabs & devices
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        const bc = new BroadcastChannel('apnisawari_sync_channel');
+        bc.postMessage({ type: 'TRIP_COMPLETED', payload: b });
+        bc.close();
+      } catch {}
+    }
+
+    setShowCompleteRideModal(null);
+    setCompleteRideConfirmedCash(false);
+
+    setNotification({
+      type: 'success',
+      title: 'Journey Safely Completed',
+      message: 'Cash of Rs. ' + b.totalPrice.toLocaleString() + ' confirmed. Captain reliability score boosted +15 pts!',
+    });
+  };
 
   // Helper to construct AppUserProfile from Supabase Auth User
   const mapSupabaseUserToProfile = (user: { id: string; email?: string; user_metadata?: Record<string, unknown> }): AppUserProfile => {
@@ -3693,41 +3876,93 @@ export default function Home() {
                                 </div>
                               </div>
 
-                              {/* Direct Coordination Action Buttons */}
-                              <div className="flex flex-col sm:flex-row items-center gap-2 pt-1">
-                                <a
-                                  href={getWhatsAppUrl(
-                                    driverPhone,
-                                    `Assalam-o-Alaikum ${driverDisplayName} bhai, I am ${currentUser?.name || 'Passenger'}. My Apni Sawari booking for ${oName} to ${dName} is confirmed. My pickup spot is: "${b.pickupAddress || 'as agreed'}". Please let me know your arrival time!`
-                                  )}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="w-full sm:flex-1 bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 shadow-2xs"
-                                >
-                                  <span>💬</span>
-                                  <span>WhatsApp Driver</span>
-                                </a>
+                              {/* In-App Live Connect Suite for Passenger */}
+                              <div className="space-y-2 pt-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setActiveChatBooking({
+                                        bookingId: b.id,
+                                        rideId: b.rideId,
+                                        peerId: targetRide?.driverId || 'driver',
+                                        peerName: driverDisplayName,
+                                        peerPhone: driverPhone,
+                                        peerRole: 'Captain',
+                                        tripRoute: oName + ' ➔ ' + dName,
+                                        totalCash: b.totalPrice,
+                                      });
+                                      setShowChatModal(true);
+                                    }}
+                                    className="flex-1 min-w-[130px] bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
+                                  >
+                                    <span>💬</span>
+                                    <span>In-App Chat</span>
+                                  </button>
 
-                                <a
-                                  href={getCallUrl(driverPhone)}
-                                  className="w-full sm:flex-1 bg-slate-900 hover:bg-black text-white font-black text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 shadow-2xs"
-                                >
-                                  <span>📞</span>
-                                  <span>Call Driver</span>
-                                </a>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setActiveCall({
+                                        bookingId: b.id,
+                                        peerName: driverDisplayName,
+                                        peerRole: 'Captain',
+                                        peerPhone: driverPhone,
+                                        status: 'RINGING',
+                                        isMuted: false,
+                                        isSpeakerOn: true,
+                                        durationSec: 0,
+                                      });
+                                    }}
+                                    className="flex-1 min-w-[120px] bg-slate-900 hover:bg-black text-white font-black text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
+                                  >
+                                    <span>📞</span>
+                                    <span>In-App Call</span>
+                                  </button>
 
-                                <a
-                                  href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
-                                    `Assalam-o-Alaikum! I am traveling via Apni Sawari Carpool.\nRoute: ${oName} to ${dName}\nDriver: ${driverDisplayName} (${driverPhone})\nCar: ${vehicleModel} (${vehiclePlate}, Color: ${vehicleColor})\nPickup: ${b.pickupAddress || 'Doorstep'}\nFare: Rs. ${b.totalPrice.toLocaleString()}\nTrack my journey safely!`
-                                  )}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="w-full sm:w-auto bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1 shadow-2xs"
-                                  title="Share complete driver & car details with family for safety"
-                                >
-                                  <span>🛡️</span>
-                                  <span>Share with Family</span>
-                                </a>
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowSosModal(true)}
+                                    className="px-3 bg-rose-600 hover:bg-rose-700 text-white font-black text-xs py-2.5 rounded-xl transition flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
+                                    title="Emergency & Motorway Police Shield"
+                                  >
+                                    <span>🛡️</span>
+                                    <span>SOS Shield</span>
+                                  </button>
+                                </div>
+
+                                <div className="flex items-center gap-3 text-[11px] text-slate-500">
+                                  <span className="text-[10px] text-slate-400 font-semibold uppercase">External:</span>
+                                  <a
+                                    href={getWhatsAppUrl(
+                                      driverPhone,
+                                      `Assalam-o-Alaikum ${driverDisplayName} bhai, I am ${currentUser?.name || 'Passenger'}. My Apni Sawari booking for ${oName} to ${dName} is confirmed. My pickup spot is: "${b.pickupAddress || 'as agreed'}". Please let me know your arrival time!`
+                                    )}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-emerald-700 hover:underline font-semibold"
+                                  >
+                                    WhatsApp
+                                  </a>
+                                  <span>•</span>
+                                  <a
+                                    href={getCallUrl(driverPhone)}
+                                    className="text-slate-700 hover:underline font-semibold"
+                                  >
+                                    Direct Dial
+                                  </a>
+                                  <span>•</span>
+                                  <a
+                                    href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
+                                      `Assalam-o-Alaikum! I am traveling via Apni Sawari Carpool.\nRoute: ${oName} to ${dName}\nDriver: ${driverDisplayName} (${driverPhone})\nCar: ${vehicleModel} (${vehiclePlate}, Color: ${vehicleColor})\nPickup: ${b.pickupAddress || 'Doorstep'}\nFare: Rs. ${b.totalPrice.toLocaleString()}\nTrack my journey safely!`
+                                    )}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-amber-700 hover:underline font-semibold"
+                                  >
+                                    Share with Family
+                                  </a>
+                                </div>
                               </div>
                             </div>
                           )}
@@ -3740,6 +3975,38 @@ export default function Home() {
                                 className="text-xs text-rose-600 hover:text-rose-800 font-bold hover:underline cursor-pointer"
                               >
                                 Cancel Booking
+                              </button>
+                            </div>
+                          )}
+
+                          {b.status === 'COMPLETED' && (
+                            <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-xl flex items-center justify-between gap-3">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xl">🎉</span>
+                                <div>
+                                  <div className="text-xs font-black text-emerald-950">Journey Safely Completed</div>
+                                  <div className="text-[11px] text-emerald-700">Rs. {b.totalPrice.toLocaleString()} Cash Paid</div>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShowPassengerCelebrationModal({
+                                    bookingId: b.id,
+                                    rideId: b.rideId,
+                                    driverName: driverDisplayName,
+                                    originCity: oName || 'Origin',
+                                    destinationCity: dName || 'Destination',
+                                    totalCash: b.totalPrice,
+                                    rating: 5,
+                                    selectedTags: ['🚗 Safe Driving', '❄️ Chilled AC'],
+                                    reviewComment: '',
+                                    submitted: false,
+                                  });
+                                }}
+                                className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs py-1.5 px-3 rounded-lg shadow-2xs cursor-pointer"
+                              >
+                                ⭐ Rate Captain
                               </button>
                             </div>
                           )}
@@ -4095,24 +4362,82 @@ export default function Home() {
                             )}
                           </div>
 
-                          {/* Instant Communication CTA Buttons */}
-                          <div className="flex flex-wrap items-center gap-2 pt-1">
-                            <a
-                              href={getWhatsAppUrl(passengerPhone, waMsg)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="flex-1 min-w-[140px] bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs py-2 px-3 rounded-lg transition flex items-center justify-center gap-1.5 shadow-2xs"
-                            >
-                              <span>💬</span>
-                              <span>WhatsApp Passenger</span>
-                            </a>
-                            <a
-                              href={getCallUrl(passengerPhone)}
-                              className="flex-1 min-w-[120px] bg-slate-900 hover:bg-black text-white font-black text-xs py-2 px-3 rounded-lg transition flex items-center justify-center gap-1.5 shadow-2xs"
-                            >
-                              <span>📞</span>
-                              <span>Call {passengerPhone}</span>
-                            </a>
+                          {/* Instant Live Connect Suite */}
+                          <div className="space-y-1.5 pt-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveChatBooking({
+                                    bookingId: b.id,
+                                    rideId: b.rideId,
+                                    peerId: b.passengerId,
+                                    peerName: passengerDisplayName,
+                                    peerPhone: passengerPhone,
+                                    peerRole: 'Passenger',
+                                    tripRoute: originName + ' ➔ ' + destName,
+                                    totalCash: b.totalPrice,
+                                  });
+                                  setShowChatModal(true);
+                                }}
+                                className="flex-1 min-w-[130px] bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs py-2 px-3 rounded-xl transition flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
+                              >
+                                <span>💬</span>
+                                <span>In-App Chat</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveCall({
+                                    bookingId: b.id,
+                                    peerName: passengerDisplayName,
+                                    peerRole: 'Passenger',
+                                    peerPhone: passengerPhone,
+                                    status: 'RINGING',
+                                    isMuted: false,
+                                    isSpeakerOn: true,
+                                    durationSec: 0,
+                                  });
+                                }}
+                                className="flex-1 min-w-[120px] bg-slate-900 hover:bg-black text-white font-black text-xs py-2 px-3 rounded-xl transition flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
+                              >
+                                <span>📞</span>
+                                <span>In-App Call</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShowCompleteRideModal(b);
+                                  setCompleteRideConfirmedCash(false);
+                                }}
+                                className="flex-1 min-w-[150px] bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs py-2 px-3 rounded-xl transition flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
+                              >
+                                <span>🏁</span>
+                                <span>Complete &amp; Cash</span>
+                              </button>
+                            </div>
+
+                            {/* Fallback external channels */}
+                            <div className="flex items-center gap-3 pt-0.5 text-[11px] text-slate-500">
+                              <span className="text-[10px] text-slate-400 font-semibold uppercase">External:</span>
+                              <a
+                                href={getWhatsAppUrl(passengerPhone, waMsg)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-emerald-700 hover:underline flex items-center gap-1 font-semibold"
+                              >
+                                <span>WhatsApp</span>
+                              </a>
+                              <span>•</span>
+                              <a
+                                href={getCallUrl(passengerPhone)}
+                                className="text-slate-700 hover:underline flex items-center gap-1 font-semibold"
+                              >
+                                <span>Direct Dial ({passengerPhone})</span>
+                              </a>
+                            </div>
                           </div>
                         </div>
                       );
@@ -6314,6 +6639,588 @@ export default function Home() {
                 </button>
               </div>
             )}
+
+      {/* MODAL 8: IN-APP LIVE CHAT & 1-CLICK GPS LOCATION */}
+      {showChatModal && activeChatBooking && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">
+          <div className="bg-white w-full max-w-lg rounded-2xl sm:rounded-3xl border border-slate-200 shadow-2xl flex flex-col h-[85vh] sm:h-[80vh] overflow-hidden">
+            {/* Header */}
+            <div className="bg-emerald-800 text-white p-3.5 sm:p-4 flex items-center justify-between shadow-xs shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="relative">
+                  <img
+                    src="/logos/logo-option4.jpg"
+                    alt="Chat Avatar"
+                    className="w-10 h-10 rounded-full object-cover border-2 border-emerald-400"
+                  />
+                  <span className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-400 border-2 border-emerald-800 rounded-full" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <h3 className="text-sm sm:text-base font-black tracking-tight">{activeChatBooking.peerName}</h3>
+                    <span className="text-[10px] bg-emerald-700 text-emerald-200 px-1.5 py-0.5 rounded-full font-bold">
+                      {activeChatBooking.peerRole}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-emerald-200">
+                    🟢 Live In-App Connect • {activeChatBooking.tripRoute}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveCall({
+                      bookingId: activeChatBooking.bookingId,
+                      peerName: activeChatBooking.peerName,
+                      peerRole: activeChatBooking.peerRole,
+                      peerPhone: activeChatBooking.peerPhone,
+                      status: 'RINGING',
+                      isMuted: false,
+                      isSpeakerOn: true,
+                      durationSec: 0,
+                    });
+                  }}
+                  className="w-8 h-8 rounded-full bg-emerald-700 hover:bg-emerald-600 text-white flex items-center justify-center text-sm shadow-xs transition cursor-pointer"
+                  title="In-App Voice Call"
+                >
+                  📞
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowChatModal(false)}
+                  className="w-8 h-8 rounded-full bg-emerald-900/60 hover:bg-emerald-900 text-white flex items-center justify-center text-sm font-bold transition cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Sub-banner: Cash & Route Context */}
+            <div className="bg-emerald-50 px-4 py-2 border-b border-emerald-100 flex items-center justify-between text-xs shrink-0">
+              <span className="text-emerald-900 font-semibold">
+                Cash Due on Boarding: <span className="font-black">Rs. {activeChatBooking.totalCash.toLocaleString()}</span>
+              </span>
+              <button
+                type="button"
+                onClick={handleShareCurrentLocation}
+                disabled={isSharingLocation}
+                className="text-[11px] bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-1 px-2 rounded-lg flex items-center gap-1 transition shadow-2xs cursor-pointer disabled:opacity-50"
+              >
+                <span>📍</span>
+                <span>{isSharingLocation ? 'Locating...' : 'Share My GPS'}</span>
+              </button>
+            </div>
+
+            {/* Chat Messages Feed */}
+            <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-3 bg-slate-50/60">
+              {chatMessages.filter((m) => m.bookingId === activeChatBooking.bookingId).length === 0 ? (
+                <div className="text-center py-8 space-y-2">
+                  <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center text-2xl mx-auto">
+                    💬
+                  </div>
+                  <div className="text-xs font-bold text-slate-700">No messages yet</div>
+                  <p className="text-[11px] text-slate-500 max-w-xs mx-auto">
+                    Coordinate your pickup spot, vehicle color, and arrival time directly inside the app.
+                  </p>
+                </div>
+              ) : (
+                chatMessages
+                  .filter((m) => m.bookingId === activeChatBooking.bookingId)
+                  .map((m) => {
+                    const isMe = m.senderId === (currentUser?.id || 'guest');
+                    return (
+                      <div key={m.id} className={'flex ' + (isMe ? 'justify-end' : 'justify-start')}>
+                        <div
+                          className={
+                            'max-w-[82%] sm:max-w-[75%] rounded-2xl p-3 shadow-2xs space-y-1.5 ' +
+                            (isMe
+                              ? 'bg-emerald-700 text-white rounded-br-xs'
+                              : 'bg-white text-slate-900 border border-slate-200 rounded-bl-xs')
+                          }
+                        >
+                          <div className="flex items-center justify-between gap-3 text-[10px] opacity-75">
+                            <span className="font-bold">{isMe ? 'You' : m.senderName}</span>
+                            <span>{m.timestamp}</span>
+                          </div>
+
+                          {m.text && <p className="text-xs sm:text-sm font-medium leading-relaxed whitespace-pre-wrap">{m.text}</p>}
+
+                          {m.location && (
+                            <div className="bg-slate-900/10 rounded-xl p-2.5 space-y-1.5 border border-white/20">
+                              <div className="flex items-center gap-1.5 text-xs font-bold">
+                                <span>📍</span>
+                                <span>Live GPS Location</span>
+                              </div>
+                              <p className="text-[11px] font-mono opacity-90">{m.location.address}</p>
+                              <a
+                                href={m.location.mapUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className={
+                                  'inline-flex items-center gap-1 text-xs font-black py-1.5 px-3 rounded-lg transition shadow-2xs ' +
+                                  (isMe
+                                    ? 'bg-white text-emerald-900 hover:bg-emerald-50'
+                                    : 'bg-emerald-700 text-white hover:bg-emerald-800')
+                                }
+                              >
+                                <span>🗺️ Open in Google Maps</span>
+                                <span>➔</span>
+                              </a>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+              )}
+              <div ref={chatMessagesEndRef} />
+            </div>
+
+            {/* Pakistani Highway Quick Travel Presets */}
+            <div className="bg-slate-100/90 px-3 py-1.5 border-t border-slate-200 flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0">
+              {[
+                'Main bahir khara hoon 📍',
+                '5 min me pohnch raha hoon ⏱️',
+                'Aap kahan hain? ❓',
+                'Gaari ka number/color? 🚗',
+                'AC on hai ❄️',
+              ].map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => handleSendChatMessage(preset)}
+                  className="whitespace-nowrap text-[10px] font-bold bg-white hover:bg-emerald-50 text-slate-700 hover:text-emerald-800 border border-slate-200 hover:border-emerald-300 py-1 px-2 rounded-full transition shadow-2xs cursor-pointer"
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+
+            {/* Input Footer */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSendChatMessage();
+              }}
+              className="p-3 bg-white border-t border-slate-200 flex items-center gap-2 shrink-0"
+            >
+              <button
+                type="button"
+                onClick={handleShareCurrentLocation}
+                disabled={isSharingLocation}
+                className="w-10 h-10 rounded-xl bg-slate-100 hover:bg-emerald-100 text-slate-700 hover:text-emerald-800 flex items-center justify-center text-lg transition cursor-pointer shrink-0 disabled:opacity-50"
+                title="Send Live GPS Pin"
+              >
+                📍
+              </button>
+              <input
+                type="text"
+                value={chatInputText}
+                onChange={(e) => setChatInputText(e.target.value)}
+                placeholder="Type message in Urdu or English..."
+                className="flex-1 bg-slate-100 border border-slate-200 focus:border-emerald-600 focus:bg-white rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-900 focus:outline-hidden transition"
+              />
+              <button
+                type="submit"
+                disabled={!chatInputText.trim()}
+                className="w-10 h-10 rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-200 text-white disabled:text-slate-400 flex items-center justify-center font-black transition cursor-pointer shrink-0 shadow-2xs"
+              >
+                ➔
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 9: IN-APP VOIP VOICE CALL SCREEN */}
+      {activeCall && (
+        <div className="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-sm rounded-3xl p-6 text-white text-center space-y-6 animate-in fade-in zoom-in-95 duration-200">
+            {/* Pulsing Avatar */}
+            <div className="relative w-28 h-28 mx-auto flex items-center justify-center">
+              <span className="absolute inset-0 rounded-full bg-emerald-500/20 animate-ping" />
+              <span className="absolute inset-2 rounded-full bg-emerald-500/30 animate-pulse" />
+              <img
+                src="/logos/logo-option4.jpg"
+                alt="Voice Calling"
+                className="w-24 h-24 rounded-full object-cover relative z-10 border-4 border-emerald-500 shadow-2xl"
+              />
+            </div>
+
+            {/* Peer Details */}
+            <div className="space-y-1.5">
+              <h3 className="text-xl font-black text-white">{activeCall.peerName}</h3>
+              <p className="text-xs text-emerald-400 font-bold uppercase tracking-wider">
+                {activeCall.peerRole} • Apni Sawari In-App Voice
+              </p>
+              <div className="text-sm font-mono text-slate-300 pt-1">
+                {activeCall.status === 'RINGING' && (
+                  <span className="animate-pulse">Ringing... Connecting secure audio</span>
+                )}
+                {activeCall.status === 'CONNECTED' && (
+                  <span className="text-emerald-400 font-bold">
+                    Connected • {Math.floor(activeCall.durationSec / 60).toString().padStart(2, '0')}:
+                    {(activeCall.durationSec % 60).toString().padStart(2, '0')} (HD)
+                  </span>
+                )}
+                {activeCall.status === 'ENDED' && <span className="text-rose-400">Call Ended</span>}
+              </div>
+            </div>
+
+            {/* Audio Controls */}
+            <div className="flex items-center justify-center gap-4 pt-4">
+              <button
+                type="button"
+                onClick={() => setActiveCall({ ...activeCall, isMuted: !activeCall.isMuted })}
+                className={
+                  'w-14 h-14 rounded-full flex items-center justify-center text-xl transition cursor-pointer shadow-lg ' +
+                  (activeCall.isMuted ? 'bg-rose-600 text-white' : 'bg-slate-800 hover:bg-slate-700 text-slate-200')
+                }
+                title={activeCall.isMuted ? 'Unmute' : 'Mute'}
+              >
+                {activeCall.isMuted ? '🔇' : '🎙️'}
+              </button>
+
+              {/* End Call Button */}
+              <button
+                type="button"
+                onClick={() => setActiveCall(null)}
+                className="w-16 h-16 rounded-full bg-rose-600 hover:bg-rose-700 text-white flex items-center justify-center text-2xl shadow-xl transition transform hover:scale-105 cursor-pointer"
+                title="End Call"
+              >
+                📞
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveCall({ ...activeCall, isSpeakerOn: !activeCall.isSpeakerOn })}
+                className={
+                  'w-14 h-14 rounded-full flex items-center justify-center text-xl transition cursor-pointer shadow-lg ' +
+                  (activeCall.isSpeakerOn ? 'bg-emerald-600 text-white' : 'bg-slate-800 hover:bg-slate-700 text-slate-200')
+                }
+                title="Speaker"
+              >
+                🔊
+              </button>
+            </div>
+
+            {/* Direct Phone Fallback */}
+            <div className="pt-4 border-t border-slate-800">
+              <a
+                href={getCallUrl(activeCall.peerPhone)}
+                className="text-xs text-slate-400 hover:text-white underline font-medium"
+              >
+                Weak internet? Switch to regular phone call ({activeCall.peerPhone})
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 10: COMPLETE JOURNEY & ANTI-FRAUD VERIFICATION */}
+      {showCompleteRideModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white w-full max-w-md rounded-2xl sm:rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="w-10 h-10 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center text-xl font-black shadow-xs">
+                  🏁
+                </span>
+                <div>
+                  <h3 className="text-base font-black text-slate-900">Complete Journey &amp; Cash</h3>
+                  <p className="text-xs text-slate-500">Apni Sawari Safe Drop-off Gate</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCompleteRideModal(null)}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center text-sm font-bold cursor-pointer transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Cash Due Card */}
+            <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl text-center space-y-1">
+              <span className="text-xs font-bold text-emerald-800 uppercase tracking-wide">Cash to Collect</span>
+              <div className="text-2xl sm:text-3xl font-black text-emerald-950">
+                Rs. {showCompleteRideModal.totalPrice.toLocaleString()}
+              </div>
+              <p className="text-[11px] text-emerald-700">
+                Passenger: <span className="font-bold">{showCompleteRideModal.passengerName || showCompleteRideModal.passengerId}</span>
+              </p>
+            </div>
+
+            {/* Anti-Fraud Velocity Shield Notice */}
+            <div className="bg-amber-50 border border-amber-200 p-3.5 rounded-2xl space-y-1.5">
+              <div className="flex items-center gap-1.5 text-xs font-black text-amber-950">
+                <span>🛡️</span>
+                <span>Anti-Collusion &amp; Fraud Prevention Engine</span>
+              </div>
+              <p className="text-[11px] text-amber-800 leading-relaxed">
+                Intercity rides are verified against physical highway travel duration. Rapid completions between acquaintances or friends are audited by the Trust Engine to prevent artificial reputation farming.
+              </p>
+            </div>
+
+            {/* Cash Confirmation Checkbox */}
+            <label className="flex items-start gap-2.5 p-3 bg-slate-50 rounded-xl border border-slate-200 cursor-pointer text-xs text-slate-700">
+              <input
+                type="checkbox"
+                checked={completeRideConfirmedCash}
+                onChange={(e) => setCompleteRideConfirmedCash(e.target.checked)}
+                className="mt-0.5 rounded text-emerald-600 focus:ring-emerald-500 h-4 w-4"
+              />
+              <span>
+                I confirm that I have safely arrived at the destination, dropped off the passenger, and received{' '}
+                <strong className="text-slate-900">Rs. {showCompleteRideModal.totalPrice.toLocaleString()}</strong> cash in full.
+              </span>
+            </label>
+
+            {/* Action Buttons */}
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setShowCompleteRideModal(null)}
+                className="flex-1 py-2.5 px-4 rounded-xl border border-slate-200 text-slate-700 font-bold text-xs hover:bg-slate-50 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!completeRideConfirmedCash}
+                onClick={handleConfirmCompleteJourney}
+                className="flex-1 py-2.5 px-4 rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-200 text-white disabled:text-slate-400 font-black text-xs transition cursor-pointer shadow-xs disabled:cursor-not-allowed"
+              >
+                Confirm &amp; Record Cash
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 11: PASSENGER CELEBRATION & 5-STAR RATING */}
+      {showPassengerCelebrationModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white w-full max-w-md rounded-2xl sm:rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-xl space-y-4">
+            <div className="text-center space-y-2">
+              <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center text-3xl mx-auto shadow-inner">
+                🎉
+              </div>
+              <h3 className="text-lg font-black text-slate-900">Safe Arrival Confirmed!</h3>
+              <p className="text-xs text-slate-600">
+                Alhamdulillah! You have reached <strong className="text-slate-900">{showPassengerCelebrationModal.destinationCity}</strong> safely.
+              </p>
+            </div>
+
+            {/* Cash Fare Receipt */}
+            <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 flex items-center justify-between text-xs">
+              <span className="text-slate-600 font-medium">Cash Paid to Captain:</span>
+              <span className="text-sm font-black text-emerald-800">
+                Rs. {showPassengerCelebrationModal.totalCash.toLocaleString()}
+              </span>
+            </div>
+
+            {/* Star Rating Selector */}
+            <div className="space-y-2 text-center">
+              <span className="text-xs font-bold text-slate-700 uppercase tracking-wide">
+                Rate Captain {showPassengerCelebrationModal.driverName}
+              </span>
+              <div className="flex items-center justify-center gap-2">
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <button
+                    key={star}
+                    type="button"
+                    onClick={() =>
+                      setShowPassengerCelebrationModal({
+                        ...showPassengerCelebrationModal,
+                        rating: star,
+                      })
+                    }
+                    className="text-2xl sm:text-3xl transition transform hover:scale-110 cursor-pointer"
+                  >
+                    {star <= showPassengerCelebrationModal.rating ? '⭐' : '☆'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Travel Compliments Tags */}
+            <div className="space-y-1.5">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wide block">
+                Compliments for the Captain:
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  '🚗 Safe Driving',
+                  '❄️ Chilled AC',
+                  '⏱️ On-Time Departure',
+                  '✨ Clean Vehicle',
+                  '🕌 Namaz / Rest Stop',
+                  '👨‍👩‍👦 Family Friendly',
+                ].map((tag) => {
+                  const isSelected = showPassengerCelebrationModal.selectedTags.includes(tag);
+                  return (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => {
+                        const newTags = isSelected
+                          ? showPassengerCelebrationModal.selectedTags.filter((t) => t !== tag)
+                          : [...showPassengerCelebrationModal.selectedTags, tag];
+                        setShowPassengerCelebrationModal({
+                          ...showPassengerCelebrationModal,
+                          selectedTags: newTags,
+                        });
+                      }}
+                      className={
+                        'text-[10px] font-bold py-1 px-2.5 rounded-full border transition cursor-pointer ' +
+                        (isSelected
+                          ? 'bg-emerald-100 border-emerald-400 text-emerald-900'
+                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50')
+                      }
+                    >
+                      {tag}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Feedback input */}
+            <textarea
+              rows={2}
+              value={showPassengerCelebrationModal.reviewComment}
+              onChange={(e) =>
+                setShowPassengerCelebrationModal({
+                  ...showPassengerCelebrationModal,
+                  reviewComment: e.target.value,
+                })
+              }
+              placeholder="Leave a helpful note for other passengers..."
+              className="w-full bg-slate-50 border border-slate-200 focus:border-emerald-600 rounded-xl p-2.5 text-xs text-slate-900 focus:outline-hidden"
+            />
+
+            {/* Submit & Return Ride CTA */}
+            <div className="space-y-2 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setNotification({
+                    type: 'success',
+                    title: 'Feedback Submitted',
+                    message: `Thank you for rating Captain ${showPassengerCelebrationModal.driverName}! Safe travels with Apni Sawari.`,
+                  });
+                  setShowPassengerCelebrationModal(null);
+                }}
+                className="w-full py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs rounded-xl shadow-xs transition cursor-pointer"
+              >
+                Submit Review &amp; Finish
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchOrigin('ALL');
+                  setSearchDest('ALL');
+                  setShowPassengerCelebrationModal(null);
+                  setPortalMode('PASSENGER');
+                }}
+                className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <span>🔄</span>
+                <span>Book Return Ride ({showPassengerCelebrationModal.destinationCity} ➔ {showPassengerCelebrationModal.originCity})</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 12: SAFETY & EMERGENCY SOS SHIELD */}
+      {showSosModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white w-full max-w-md rounded-2xl sm:rounded-3xl p-5 sm:p-6 border border-rose-200 shadow-xl space-y-4">
+            <div className="flex items-center justify-between border-b border-rose-100 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="w-10 h-10 rounded-2xl bg-rose-600 text-white flex items-center justify-center text-xl font-black shadow-xs">
+                  🛡️
+                </span>
+                <div>
+                  <h3 className="text-base font-black text-slate-900">Apni Sawari Safety Shield</h3>
+                  <p className="text-xs text-rose-600 font-bold">Motorway &amp; Pakistan Emergency Hotlines</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSosModal(false)}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center text-sm font-bold cursor-pointer transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              If you feel unsafe or experience a breakdown during your highway journey, tap below to connect immediately with official authorities:
+            </p>
+
+            <div className="space-y-2">
+              <a
+                href="tel:130"
+                className="p-3 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl flex items-center justify-between transition cursor-pointer"
+              >
+                <div className="flex items-center gap-2.5">
+                  <span className="text-2xl">🚔</span>
+                  <div>
+                    <div className="text-xs font-black text-rose-950">Motorway Police (NHMP)</div>
+                    <div className="text-[11px] text-rose-700">Helpline for M-9, M-2, N-5 Highways</div>
+                  </div>
+                </div>
+                <span className="text-sm font-black text-rose-800 bg-rose-200 px-2.5 py-1 rounded-lg">130</span>
+              </a>
+
+              <a
+                href="tel:1122"
+                className="p-3 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl flex items-center justify-between transition cursor-pointer"
+              >
+                <div className="flex items-center gap-2.5">
+                  <span className="text-2xl">🚑</span>
+                  <div>
+                    <div className="text-xs font-black text-amber-950">Rescue 1122</div>
+                    <div className="text-[11px] text-amber-700">Emergency medical &amp; roadside rescue</div>
+                  </div>
+                </div>
+                <span className="text-sm font-black text-amber-800 bg-amber-200 px-2.5 py-1 rounded-lg">1122</span>
+              </a>
+
+              {currentUser?.emergencyContact && (
+                <a
+                  href={'tel:' + currentUser.emergencyContact}
+                  className="p-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl flex items-center justify-between transition cursor-pointer"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-2xl">👨‍👩‍👧</span>
+                    <div>
+                      <div className="text-xs font-black text-slate-900">Emergency Family Contact</div>
+                      <div className="text-[11px] text-slate-500">{currentUser.emergencyContact}</div>
+                    </div>
+                  </div>
+                  <span className="text-xs font-bold text-slate-700 bg-slate-200 px-2 py-1 rounded-lg">Call Relative</span>
+                </a>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowSosModal(false)}
+              className="w-full py-2.5 bg-slate-900 hover:bg-black text-white font-bold text-xs rounded-xl transition cursor-pointer"
+            >
+              Close Safety Shield
+            </button>
+          </div>
+        </div>
+      )}
 
             {/* Step-by-Step Installation Tabs */}
             <div className="space-y-3">
