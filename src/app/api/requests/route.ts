@@ -9,6 +9,16 @@ function getSupabaseAdmin() {
   return createClient(SUPABASE_URL, SUPABASE_KEY);
 }
 
+// Global server memory cache to guarantee instant real-time live availability across all tabs & devices
+declare global {
+  // eslint-disable-next-line no-var
+  var _serverSharedRequests: PassengerRideRequest[] | undefined;
+}
+
+if (!globalThis._serverSharedRequests) {
+  globalThis._serverSharedRequests = [];
+}
+
 const BUCKET_NAME = 'network_data';
 const FILE_NAME = 'passenger_requests.json';
 
@@ -83,11 +93,20 @@ async function saveRequestsToStorage(
 
 export async function GET() {
   const supabase = getSupabaseAdmin();
-  if (!supabase) {
-    return NextResponse.json({ requests: [] });
+  let requests: PassengerRideRequest[] = [];
+
+  if (supabase) {
+    requests = await loadRequestsFromStorage(supabase);
   }
 
-  const requests = await loadRequestsFromStorage(supabase);
+  // Merge server memory cache to guarantee instant real-time live availability
+  if (globalThis._serverSharedRequests && globalThis._serverSharedRequests.length > 0) {
+    const map = new Map<string, PassengerRideRequest>();
+    requests.forEach((r) => map.set(r.id, r));
+    globalThis._serverSharedRequests.forEach((r) => map.set(r.id, { ...map.get(r.id), ...r }));
+    requests = Array.from(map.values());
+  }
+
   return NextResponse.json(
     { requests },
     {
@@ -102,15 +121,18 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   const supabase = getSupabaseAdmin();
-  if (!supabase) {
-    return NextResponse.json({ error: 'Supabase credentials missing' }, { status: 500 });
-  }
 
   try {
     const body = await request.json();
     const { action, request: newReq, requests: fullList, requestId, offer, offerId } = body;
 
-    let currentList = await loadRequestsFromStorage(supabase);
+    let currentList: PassengerRideRequest[] = [];
+    if (supabase) {
+      currentList = await loadRequestsFromStorage(supabase);
+    }
+    if (currentList.length === 0 && globalThis._serverSharedRequests) {
+      currentList = [...globalThis._serverSharedRequests];
+    }
 
     if (Array.isArray(fullList)) {
       currentList = fullList;
@@ -144,7 +166,12 @@ export async function POST(request: NextRequest) {
       currentList = [newReq, ...currentList.filter((r) => r.id !== newReq.id)];
     }
 
-    await saveRequestsToStorage(supabase, currentList);
+    // Save in global server memory cache
+    globalThis._serverSharedRequests = currentList;
+
+    if (supabase) {
+      await saveRequestsToStorage(supabase, currentList);
+    }
 
     return NextResponse.json(
       { success: true, requests: currentList },

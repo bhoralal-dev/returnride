@@ -804,6 +804,12 @@ export default function Home() {
   // Google OAuth Setup & Fallback Modal State
   const [showGoogleSetupModal, setShowGoogleSetupModal] = useState<{ isOpen: boolean; callbackUrl: string } | null>(null);
 
+  // Client hydration timestamp to safely calculate dynamic time without Next.js prerender error
+  const [clientMountTime, setClientMountTime] = useState<number>(0);
+  useEffect(() => {
+    setClientMountTime(Date.now());
+  }, []);
+
   // Auto-scroll chat to latest message
   useEffect(() => {
     if (showChatModal && chatMessagesEndRef.current) {
@@ -1263,14 +1269,14 @@ export default function Home() {
     }
   };
 
-  const savePassengerRequests = (updatedRequests: PassengerRideRequest[]) => {
+  const savePassengerRequests = (updatedRequests: PassengerRideRequest[], item?: PassengerRideRequest) => {
     setPassengerRequests(updatedRequests);
     if (typeof window !== 'undefined') {
       try {
         localStorage.setItem('apnisawari_requests_v1', JSON.stringify(updatedRequests));
         if ('BroadcastChannel' in window) {
           const bc = new BroadcastChannel('apnisawari_sync_channel');
-          bc.postMessage({ type: 'SYNC_REQUESTS', payload: updatedRequests });
+          bc.postMessage({ type: 'SYNC_REQUESTS', payload: updatedRequests, item });
           bc.close();
         }
       } catch {}
@@ -1482,9 +1488,10 @@ export default function Home() {
           if (Array.isArray(data.rides) && data.rides.length > 0) {
             setRides((prevRides) => {
               const liveMap = new Map<string, Ride>();
-              INITIAL_RIDES.forEach((r) => liveMap.set(r.id, r));
-              prevRides.forEach((r) => liveMap.set(r.id, r));
+              // Fresh server rides placed first
               data.rides.forEach((r: Ride) => liveMap.set(r.id, r));
+              prevRides.forEach((r) => liveMap.set(r.id, r));
+              INITIAL_RIDES.forEach((r) => liveMap.set(r.id, r));
 
               const merged = Array.from(liveMap.values());
               try {
@@ -1502,8 +1509,9 @@ export default function Home() {
           if (Array.isArray(data.requests)) {
             setPassengerRequests((prevReqs) => {
               const reqMap = new Map<string, PassengerRideRequest>();
-              prevReqs.forEach((r) => reqMap.set(r.id, r));
+              // Fresh server requests placed first
               data.requests.forEach((r: PassengerRideRequest) => reqMap.set(r.id, r));
+              prevReqs.forEach((r) => reqMap.set(r.id, r));
               const merged = Array.from(reqMap.values());
               try {
                 localStorage.setItem('apnisawari_requests_v1', JSON.stringify(merged));
@@ -1520,8 +1528,8 @@ export default function Home() {
           if (Array.isArray(data.bookings) && data.bookings.length > 0) {
             setBookings((prevBookings) => {
               const bMap = new Map<string, BookingRequest>();
-              prevBookings.forEach((b) => bMap.set(b.id, b));
               data.bookings.forEach((b: BookingRequest) => bMap.set(b.id, b));
+              prevBookings.forEach((b) => bMap.set(b.id, b));
               const merged = Array.from(bMap.values());
               try {
                 localStorage.setItem('apnisawari_bookings_v1', JSON.stringify(merged));
@@ -1538,8 +1546,8 @@ export default function Home() {
     // Initial instant sync
     syncNetworkData();
 
-    // Fast polling interval (every 3.5s) to guarantee instantaneous cross-browser live updates
-    const networkSyncInterval = setInterval(syncNetworkData, 3500);
+    // Fast polling interval (every 2.0s) to guarantee instantaneous cross-browser live updates
+    const networkSyncInterval = setInterval(syncNetworkData, 2000);
 
     const handleFocusSync = () => {
       checkAndSyncFromStorage();
@@ -1713,8 +1721,18 @@ export default function Home() {
     });
 
     // PRIORITY SORTING:
-    // If browsing All Pakistan, prioritize rides departing from near user's city first, then arriving in user's city, then the rest
+    // Freshly offered rides rise to the top immediately; followed by proximity to user's city
     return [...filtered].sort((a, b) => {
+      const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+
+      // 1. If one ride is significantly newer (e.g. freshly published today vs older baseline data)
+      const dayDiff = Math.abs(bTime - aTime);
+      if (dayDiff > 1000 * 60 * 60 * 24) {
+        return bTime - aTime;
+      }
+
+      // 2. Proximity to passenger's city when browsing All Pakistan
       if (searchOrigin === 'ALL') {
         const aMatchesOrigin = userCityId && a.originLocationId === userCityId ? 1 : 0;
         const bMatchesOrigin = userCityId && b.originLocationId === userCityId ? 1 : 0;
@@ -1724,7 +1742,8 @@ export default function Home() {
         const bMatchesDest = userCityId && b.destinationLocationId === userCityId ? 1 : 0;
         if (aMatchesDest !== bMatchesDest) return bMatchesDest - aMatchesDest;
       }
-      return 0;
+
+      return bTime - aTime;
     });
   }, [rides, searchOrigin, searchDest, activeTagFilter, userCityId]);
 
@@ -2309,7 +2328,7 @@ export default function Home() {
     };
 
     const updatedReqs = [newReq, ...passengerRequests];
-    savePassengerRequests(updatedReqs);
+    savePassengerRequests(updatedReqs, newReq);
     setShowPostRequestModal(false);
     setNotification({
       type: 'success',
@@ -4015,6 +4034,7 @@ export default function Home() {
                       const depDate = new Date(ride.departureTime);
                       const timeStr = isNaN(depDate.getTime()) ? '07:00 AM' : depDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
                       const dateStr = isNaN(depDate.getTime()) ? '' : depDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                      const isFreshlyPublished = Boolean(clientMountTime && ride.createdAt && (clientMountTime - new Date(ride.createdAt).getTime()) < 1000 * 60 * 60 * 48);
 
                       return (
                         <div
@@ -4049,6 +4069,11 @@ export default function Home() {
                                   <span className="inline-flex items-center gap-1 text-[11px] font-black text-amber-900 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
                                     ★ {ride.driverTier === 'TOP_RATED_DRIVER' ? '4.9' : '4.8'}
                                   </span>
+                                  {isFreshlyPublished && (
+                                    <span className="text-[10px] font-black text-emerald-950 bg-emerald-100 px-2.5 py-0.5 rounded-full border border-emerald-400 animate-pulse shadow-2xs">
+                                      ✨ Just Published
+                                    </span>
+                                  )}
                                   {ride.originLocationId === userCityId && (
                                     <span className="text-[10px] font-black text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
                                       📍 Near You ({oName})
