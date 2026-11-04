@@ -73,6 +73,146 @@ export interface ActiveCallState {
   durationSec: number;
 }
 
+export interface IncomingCallState {
+  callId: string;
+  callerId: string;
+  callerName: string;
+  callerRole: 'Captain' | 'Passenger';
+  callerPhone: string;
+  bookingId: string;
+  tripRoute: string;
+}
+
+// Zero-dependency Web Audio API Sound Synthesizer for realistic calling and chat audio
+class AppSoundEffects {
+  private ctx: AudioContext | null = null;
+  private ringInterval: ReturnType<typeof setInterval> | null = null;
+
+  private getContext(): AudioContext | null {
+    if (typeof window === 'undefined') return null;
+    try {
+      if (!this.ctx) {
+        const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        this.ctx = new AudioCtx();
+      }
+      if (this.ctx && this.ctx.state === 'suspended') {
+        this.ctx.resume();
+      }
+      return this.ctx;
+    } catch {
+      return null;
+    }
+  }
+
+  playOutgoingTone() {
+    this.stopAll();
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    const playBeep = () => {
+      try {
+        const osc1 = ctx.createOscillator();
+        const osc2 = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc1.type = 'sine';
+        osc2.type = 'sine';
+        osc1.frequency.setValueAtTime(440, ctx.currentTime);
+        osc2.frequency.setValueAtTime(480, ctx.currentTime);
+
+        gain.gain.setValueAtTime(0.06, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 1.2);
+
+        osc1.connect(gain);
+        osc2.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc1.start();
+        osc2.start();
+        osc1.stop(ctx.currentTime + 1.2);
+        osc2.stop(ctx.currentTime + 1.2);
+      } catch {}
+    };
+
+    playBeep();
+    this.ringInterval = setInterval(playBeep, 3000);
+  }
+
+  playIncomingRingtone() {
+    this.stopAll();
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    const playMelody = () => {
+      try {
+        const notes = [587.33, 659.25, 880, 783.99];
+        notes.forEach((freq, idx) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          const start = ctx.currentTime + idx * 0.16;
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, start);
+          gain.gain.setValueAtTime(0.1, start);
+          gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.3);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(start);
+          osc.stop(start + 0.3);
+        });
+      } catch {}
+    };
+
+    playMelody();
+    this.ringInterval = setInterval(playMelody, 2000);
+  }
+
+  playConnectedBeep() {
+    this.stopAll();
+    const ctx = this.getContext();
+    if (!ctx) return;
+    try {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523.25, ctx.currentTime);
+      osc.frequency.setValueAtTime(659.25, ctx.currentTime + 0.12);
+      gain.gain.setValueAtTime(0.08, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.3);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.3);
+    } catch {}
+  }
+
+  playChatChime() {
+    const ctx = this.getContext();
+    if (!ctx) return;
+    try {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(800, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(1200, ctx.currentTime + 0.08);
+      gain.gain.setValueAtTime(0.07, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.15);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.15);
+    } catch {}
+  }
+
+  stopAll() {
+    if (this.ringInterval) {
+      clearInterval(this.ringInterval);
+      this.ringInterval = null;
+    }
+  }
+}
+
+const soundFx = new AppSoundEffects();
+
 export interface PassengerCelebrationState {
   bookingId: string;
   rideId: string;
@@ -634,6 +774,7 @@ export default function Home() {
 
   // In-App VoIP Call State
   const [activeCall, setActiveCall] = useState<ActiveCallState | null>(null);
+  const [incomingCall, setIncomingCall] = useState<IncomingCallState | null>(null);
 
   // Safe Journey Completion & Anti-Fraud State
   const [showCompleteRideModal, setShowCompleteRideModal] = useState<BookingRequest | null>(null);
@@ -670,19 +811,97 @@ export default function Home() {
     }
   }, [chatMessages, showChatModal]);
 
+  // In-App Call Handlers with Cross-Tab Audio & Broadcast
+  const handleStartVoipCall = (bookingId: string, peerName: string, peerRole: 'Captain' | 'Passenger', peerPhone: string, tripRoute: string) => {
+    soundFx.playOutgoingTone();
+    setActiveCall({
+      bookingId,
+      peerName,
+      peerRole,
+      peerPhone,
+      status: 'RINGING',
+      isMuted: false,
+      isSpeakerOn: true,
+      durationSec: 0,
+    });
+
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        const bc = new BroadcastChannel('apnisawari_sync_channel');
+        bc.postMessage({
+          type: 'CALL_START',
+          payload: {
+            callId: 'call_' + Date.now(),
+            callerId: currentUser?.id || 'guest',
+            callerName: currentUser?.name || (peerRole === 'Captain' ? 'Passenger' : 'Captain'),
+            callerRole: peerRole === 'Captain' ? 'Passenger' : 'Captain',
+            callerPhone: currentUser?.phone || '',
+            bookingId,
+            tripRoute,
+          },
+        });
+        bc.close();
+      } catch {}
+    }
+  };
+
+  const handleAcceptIncomingCall = () => {
+    if (!incomingCall) return;
+    soundFx.playConnectedBeep();
+    setActiveCall({
+      bookingId: incomingCall.bookingId,
+      peerName: incomingCall.callerName,
+      peerRole: incomingCall.callerRole,
+      peerPhone: incomingCall.callerPhone,
+      status: 'CONNECTED',
+      isMuted: false,
+      isSpeakerOn: true,
+      durationSec: 0,
+    });
+    setIncomingCall(null);
+
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        const bc = new BroadcastChannel('apnisawari_sync_channel');
+        bc.postMessage({ type: 'CALL_ACCEPTED', payload: { bookingId: incomingCall.bookingId } });
+        bc.close();
+      } catch {}
+    }
+  };
+
+  const handleEndVoipCall = () => {
+    soundFx.stopAll();
+    setActiveCall((prev) => (prev ? { ...prev, status: 'ENDED' } : null));
+    setIncomingCall(null);
+    setTimeout(() => setActiveCall(null), 1000);
+
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        const bc = new BroadcastChannel('apnisawari_sync_channel');
+        bc.postMessage({ type: 'CALL_ENDED' });
+        bc.close();
+      } catch {}
+    }
+  };
+
   // In-App Call Simulation & Duration Timer
   useEffect(() => {
     let callTimer: NodeJS.Timeout | null = null;
     let ringTimeout: NodeJS.Timeout | null = null;
 
     if (activeCall && activeCall.status === 'RINGING') {
+      // Auto-fallback connect after 4s if recipient tab is unattended
       ringTimeout = setTimeout(() => {
+        soundFx.playConnectedBeep();
         setActiveCall((prev) => (prev && prev.status === 'RINGING' ? { ...prev, status: 'CONNECTED' } : prev));
-      }, 2500);
+      }, 4000);
     } else if (activeCall && activeCall.status === 'CONNECTED') {
+      soundFx.stopAll();
       callTimer = setInterval(() => {
         setActiveCall((prev) => (prev && prev.status === 'CONNECTED' ? { ...prev, durationSec: prev.durationSec + 1 } : prev));
       }, 1000);
+    } else if (!activeCall) {
+      soundFx.stopAll();
     }
 
     return () => {
@@ -1132,6 +1351,14 @@ export default function Home() {
             setPassengerRequests(savedRequests);
           }
         }
+
+        const savedChatStr = localStorage.getItem('apnisawari_chat_messages_v1');
+        if (savedChatStr) {
+          const savedChat = JSON.parse(savedChatStr);
+          if (Array.isArray(savedChat)) {
+            setChatMessages(savedChat);
+          }
+        }
       } catch {
         // Safe ignore
       }
@@ -1151,16 +1378,45 @@ export default function Home() {
             if (item) {
               const oName = NATIONWIDE_CITIES.find((c) => c.id === item.originLocationId)?.name || 'Origin';
               const dName = NATIONWIDE_CITIES.find((c) => c.id === item.destinationLocationId)?.name || 'Destination';
+              // Instantly clear any restrictive filters so the newly published ride is front-and-center
+              setSearchOrigin('ALL');
+              setSearchDest('ALL');
+              setActiveTagFilter('ALL');
               setNotification({
-                type: 'info',
-                title: '⚡ Live Network Update',
-                message: `New ride published: ${oName} ➔ ${dName}. Showing across Apni Sawari network.`,
+                type: 'success',
+                title: '⚡ Live Ride Alert!',
+                message: `New ride offered: ${oName} ➔ ${dName} by ${item.driverName || 'Captain'}. Now live on your screen.`,
               });
             }
           } else if (type === 'SYNC_BOOKINGS' && Array.isArray(payload)) {
             setBookings(payload);
           } else if (type === 'SYNC_REQUESTS' && Array.isArray(payload)) {
             setPassengerRequests(payload);
+            if (item) {
+              const oName = item.originName || NATIONWIDE_CITIES.find((c) => c.id === item.originLocationId)?.name || 'Origin';
+              const dName = item.destinationName || NATIONWIDE_CITIES.find((c) => c.id === item.destinationLocationId)?.name || 'Destination';
+              setNotification({
+                type: 'success',
+                title: '📢 New Passenger Lead!',
+                message: `${item.passengerName || 'Passenger'} needs a ride: ${oName} ➔ ${dName} (Budget: Rs. ${item.budgetPrice?.toLocaleString()}).`,
+              });
+            }
+          } else if (type === 'SYNC_CHAT' && Array.isArray(payload)) {
+            setChatMessages(payload);
+            soundFx.playChatChime();
+          } else if (type === 'CALL_START' && payload) {
+            if (payload.callerId !== currentUser?.id) {
+              setIncomingCall(payload);
+              soundFx.playIncomingRingtone();
+            }
+          } else if (type === 'CALL_ACCEPTED') {
+            soundFx.playConnectedBeep();
+            setActiveCall((prev) => (prev ? { ...prev, status: 'CONNECTED', durationSec: 0 } : null));
+          } else if (type === 'CALL_ENDED') {
+            soundFx.stopAll();
+            setActiveCall((prev) => (prev ? { ...prev, status: 'ENDED' } : null));
+            setIncomingCall(null);
+            setTimeout(() => setActiveCall(null), 1200);
           }
         };
       }
@@ -1179,6 +1435,8 @@ export default function Home() {
         try { setBookings(JSON.parse(e.newValue)); } catch {}
       } else if (e.key === 'apnisawari_requests_v1' && e.newValue) {
         try { setPassengerRequests(JSON.parse(e.newValue)); } catch {}
+      } else if (e.key === 'apnisawari_chat_messages_v1' && e.newValue) {
+        try { setChatMessages(JSON.parse(e.newValue)); } catch {}
       }
     };
     window.addEventListener('storage', handleStorageChange);
@@ -3924,18 +4182,44 @@ export default function Home() {
                                 )}
                               </div>
 
-                              <button
-                                type="button"
-                                onClick={() => handleSelectRideForBooking(ride)}
-                                disabled={isFull}
-                                className={`px-5 py-2.5 rounded-full font-black text-xs transition cursor-pointer shadow-sm text-center shrink-0 ${
-                                  isFull
-                                    ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
-                                    : 'bg-emerald-700 hover:bg-emerald-800 text-white'
-                                }`}
-                              >
-                                {isFull ? 'Sold Out' : 'Book Seat ➔'}
-                              </button>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const oName = NATIONWIDE_CITIES.find((c) => c.id === ride.originLocationId)?.name || 'Origin';
+                                    const dName = NATIONWIDE_CITIES.find((c) => c.id === ride.destinationLocationId)?.name || 'Destination';
+                                    setActiveChatBooking({
+                                      bookingId: 'inquire_' + ride.id,
+                                      rideId: ride.id,
+                                      peerId: ride.driverId,
+                                      peerName: ride.driverName || 'Verified Captain',
+                                      peerPhone: ride.driverPhone || '0300-1234567',
+                                      peerRole: 'Captain',
+                                      tripRoute: oName + ' ➔ ' + dName,
+                                      totalCash: ride.seatPrice || 0,
+                                    });
+                                    setShowChatModal(true);
+                                  }}
+                                  className="px-3.5 py-2.5 rounded-full font-bold text-xs bg-slate-100 hover:bg-emerald-50 text-slate-700 hover:text-emerald-800 border border-slate-200 transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                                  title="Chat with Captain before booking"
+                                >
+                                  <span>💬</span>
+                                  <span>Chat</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleSelectRideForBooking(ride)}
+                                  disabled={isFull}
+                                  className={`px-5 py-2.5 rounded-full font-black text-xs transition cursor-pointer shadow-sm text-center shrink-0 ${
+                                    isFull
+                                      ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
+                                      : 'bg-emerald-700 hover:bg-emerald-800 text-white'
+                                  }`}
+                                >
+                                  {isFull ? 'Sold Out' : 'Book Seat ➔'}
+                                </button>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -4366,6 +4650,63 @@ export default function Home() {
                             </div>
                           )}
 
+                          {/* Instant Live Connect for PENDING bookings */}
+                          {b.status === 'PENDING' && (
+                            <div className="bg-amber-50/80 border border-amber-200 p-3 sm:p-3.5 rounded-xl space-y-2">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-sm">⏳</span>
+                                  <span className="text-xs font-black text-amber-950">Awaiting Driver Confirmation</span>
+                                </div>
+                                <span className="text-[10px] bg-amber-200/80 text-amber-900 font-bold px-2 py-0.5 rounded-full">
+                                  Connect Live
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-amber-900">
+                                Message or call Captain {driverDisplayName} to coordinate pickup landmark and confirm your seat fast:
+                              </p>
+                              <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveChatBooking({
+                                      bookingId: b.id,
+                                      rideId: b.rideId,
+                                      peerId: targetRide?.driverId || 'driver',
+                                      peerName: driverDisplayName,
+                                      peerPhone: driverPhone,
+                                      peerRole: 'Captain',
+                                      tripRoute: (oName || 'Origin') + ' ➔ ' + (dName || 'Destination'),
+                                      totalCash: b.totalPrice,
+                                    });
+                                    setShowChatModal(true);
+                                  }}
+                                  className="flex-1 min-w-[130px] bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-2 px-3 rounded-lg transition flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
+                                >
+                                  <span>💬</span>
+                                  <span>In-App Chat</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleStartVoipCall(
+                                      b.id,
+                                      driverDisplayName,
+                                      'Captain',
+                                      driverPhone,
+                                      (oName || 'Origin') + ' ➔ ' + (dName || 'Destination')
+                                    );
+                                  }}
+                                  className="flex-1 min-w-[120px] bg-slate-900 hover:bg-black text-white font-black text-xs py-2 px-3 rounded-lg transition flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
+                                >
+                                  <span>📞</span>
+                                  <span>In-App Call</span>
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
                           {/* Confirmed Ride Ticket Voucher with Direct WhatsApp, Call, & Family Safety Sharing */}
                           {b.status === 'ACCEPTED' && (
                             <div className="bg-emerald-50 text-emerald-950 p-3.5 sm:p-4 rounded-2xl border-2 border-emerald-300 space-y-3">
@@ -4472,16 +4813,13 @@ export default function Home() {
                                   <button
                                     type="button"
                                     onClick={() => {
-                                      setActiveCall({
-                                        bookingId: b.id,
-                                        peerName: driverDisplayName,
-                                        peerRole: 'Captain',
-                                        peerPhone: driverPhone,
-                                        status: 'RINGING',
-                                        isMuted: false,
-                                        isSpeakerOn: true,
-                                        durationSec: 0,
-                                      });
+                                      handleStartVoipCall(
+                                        b.id,
+                                        driverDisplayName,
+                                        'Captain',
+                                        driverPhone,
+                                        (oName || 'Origin') + ' ➔ ' + (dName || 'Destination')
+                                      );
                                     }}
                                     className="flex-1 min-w-[120px] bg-slate-900 hover:bg-black text-white font-black text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
                                   >
@@ -4830,7 +5168,53 @@ export default function Home() {
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2 shrink-0 w-full md:w-auto justify-end">
+                        <div className="flex flex-wrap items-center gap-2 shrink-0 w-full md:w-auto justify-end">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const targetRide = rides.find((r) => r.id === req.rideId);
+                              const oName = targetRide ? NATIONWIDE_CITIES.find((c) => c.id === targetRide.originLocationId)?.name || 'Origin' : 'Origin';
+                              const dName = targetRide ? NATIONWIDE_CITIES.find((c) => c.id === targetRide.destinationLocationId)?.name || 'Destination' : 'Destination';
+                              setActiveChatBooking({
+                                bookingId: req.id,
+                                rideId: req.rideId,
+                                peerId: req.passengerId,
+                                peerName: req.passengerName || req.passengerId,
+                                peerPhone: req.passengerPhone || '0300-1234567',
+                                peerRole: 'Passenger',
+                                tripRoute: oName + ' ➔ ' + dName,
+                                totalCash: req.totalPrice,
+                              });
+                              setShowChatModal(true);
+                            }}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs py-2 px-3 rounded-lg transition flex items-center gap-1 shadow-2xs cursor-pointer"
+                            title="Chat with Passenger"
+                          >
+                            <span>💬</span>
+                            <span>Chat</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const targetRide = rides.find((r) => r.id === req.rideId);
+                              const oName = targetRide ? NATIONWIDE_CITIES.find((c) => c.id === targetRide.originLocationId)?.name || 'Origin' : 'Origin';
+                              const dName = targetRide ? NATIONWIDE_CITIES.find((c) => c.id === targetRide.destinationLocationId)?.name || 'Destination' : 'Destination';
+                              handleStartVoipCall(
+                                req.id,
+                                req.passengerName || req.passengerId,
+                                'Passenger',
+                                req.passengerPhone || '0300-1234567',
+                                oName + ' ➔ ' + dName
+                              );
+                            }}
+                            className="bg-slate-900 hover:bg-black text-white font-black text-xs py-2 px-3 rounded-lg transition flex items-center gap-1 shadow-2xs cursor-pointer"
+                            title="Call Passenger"
+                          >
+                            <span>📞</span>
+                            <span>Call</span>
+                          </button>
+
                           <button
                             type="button"
                             onClick={() => handleAcceptBooking(req)}
@@ -4958,16 +5342,13 @@ export default function Home() {
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setActiveCall({
-                                    bookingId: b.id,
-                                    peerName: passengerDisplayName,
-                                    peerRole: 'Passenger',
-                                    peerPhone: passengerPhone,
-                                    status: 'RINGING',
-                                    isMuted: false,
-                                    isSpeakerOn: true,
-                                    durationSec: 0,
-                                  });
+                                  handleStartVoipCall(
+                                    b.id,
+                                    passengerDisplayName,
+                                    'Passenger',
+                                    passengerPhone,
+                                    (originName || 'Origin') + ' ➔ ' + (destName || 'Destination')
+                                  );
                                 }}
                                 className="flex-1 min-w-[120px] bg-slate-900 hover:bg-black text-white font-black text-xs py-2 px-3 rounded-xl transition flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
                               >
@@ -7470,16 +7851,13 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={() => {
-                    setActiveCall({
-                      bookingId: activeChatBooking.bookingId,
-                      peerName: activeChatBooking.peerName,
-                      peerRole: activeChatBooking.peerRole,
-                      peerPhone: activeChatBooking.peerPhone,
-                      status: 'RINGING',
-                      isMuted: false,
-                      isSpeakerOn: true,
-                      durationSec: 0,
-                    });
+                    handleStartVoipCall(
+                      activeChatBooking.bookingId,
+                      activeChatBooking.peerName,
+                      activeChatBooking.peerRole,
+                      activeChatBooking.peerPhone,
+                      activeChatBooking.tripRoute
+                    );
                   }}
                   className="w-8 h-8 rounded-full bg-emerald-700 hover:bg-emerald-600 text-white flex items-center justify-center text-sm shadow-xs transition cursor-pointer"
                   title="In-App Voice Call"
@@ -7658,6 +8036,50 @@ export default function Home() {
                 {activeCall.status === 'RINGING' && (
                   <span className="animate-pulse">Ringing... Connecting secure audio</span>
                 )}
+
+      {/* MODAL 9.5: INCOMING IN-APP VOIP VOICE CALL POPUP */}
+      {incomingCall && (
+        <div className="fixed inset-0 z-70 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in zoom-in-95 duration-200">
+          <div className="bg-slate-900 border border-emerald-500/50 w-full max-w-sm rounded-3xl p-6 text-white text-center space-y-5 shadow-2xl">
+            <div className="relative w-24 h-24 mx-auto flex items-center justify-center">
+              <span className="absolute inset-0 rounded-full bg-emerald-500/30 animate-ping" />
+              <span className="w-20 h-20 rounded-full bg-emerald-600 flex items-center justify-center text-3xl shadow-lg relative z-10 border-2 border-emerald-400">
+                📞
+              </span>
+            </div>
+
+            <div className="space-y-1">
+              <span className="text-[10px] uppercase font-black tracking-widest text-emerald-400 bg-emerald-950/80 px-2.5 py-0.5 rounded-full border border-emerald-500/30 inline-block">
+                Incoming In-App Voice Call
+              </span>
+              <h3 className="text-xl font-black text-white pt-1">{incomingCall.callerName}</h3>
+              <p className="text-xs text-slate-300 font-bold">
+                {incomingCall.callerRole} • {incomingCall.tripRoute}
+              </p>
+            </div>
+
+            <div className="flex items-center justify-center gap-6 pt-3">
+              <button
+                type="button"
+                onClick={handleEndVoipCall}
+                className="w-16 h-16 rounded-full bg-rose-600 hover:bg-rose-700 text-white flex flex-col items-center justify-center text-xs font-bold shadow-xl transition cursor-pointer"
+              >
+                <span className="text-xl">✕</span>
+                <span className="text-[9px]">Decline</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleAcceptIncomingCall}
+                className="w-16 h-16 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white flex flex-col items-center justify-center text-xs font-bold shadow-xl transition transform hover:scale-110 cursor-pointer animate-pulse"
+              >
+                <span className="text-xl">📞</span>
+                <span className="text-[9px]">Accept</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
                 {activeCall.status === 'CONNECTED' && (
                   <span className="text-emerald-400 font-bold">
                     Connected • {Math.floor(activeCall.durationSec / 60).toString().padStart(2, '0')}:
@@ -7685,7 +8107,7 @@ export default function Home() {
               {/* End Call Button */}
               <button
                 type="button"
-                onClick={() => setActiveCall(null)}
+                onClick={handleEndVoipCall}
                 className="w-16 h-16 rounded-full bg-rose-600 hover:bg-rose-700 text-white flex items-center justify-center text-2xl shadow-xl transition transform hover:scale-105 cursor-pointer"
                 title="End Call"
               >
