@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { normalizePakistaniPhone, getWhatsAppUrl, getCallUrl, formatPakistaniCnic, validatePakistaniCnic } from '@/lib/phone';
@@ -1299,6 +1299,84 @@ export default function Home() {
     }
   };
 
+  // 4b. Real-Time Nationwide Network Sync (Across Different Browsers, Tabs & Devices)
+  const syncNetworkData = useCallback(async () => {
+    if (typeof window === 'undefined') return;
+    try {
+      // Fetch live rides from server
+      const ridesRes = await fetch('/api/rides', { cache: 'no-store' });
+      if (ridesRes.ok) {
+        const data = await ridesRes.json();
+        if (Array.isArray(data.rides) && data.rides.length > 0) {
+          setRides((prevRides) => {
+            const liveMap = new Map<string, Ride>();
+            // Fresh server rides placed first as the authoritative truth
+            data.rides.forEach((r: Ride) => liveMap.set(r.id, r));
+            prevRides.forEach((r) => {
+              if (!liveMap.has(r.id)) {
+                liveMap.set(r.id, r);
+              }
+            });
+            INITIAL_RIDES.forEach((r) => {
+              if (!liveMap.has(r.id)) {
+                liveMap.set(r.id, r);
+              }
+            });
+
+            const merged = Array.from(liveMap.values());
+            try {
+              localStorage.setItem('apnisawari_rides_v1', JSON.stringify(merged));
+            } catch {}
+            return merged;
+          });
+        }
+      }
+
+      // Fetch live passenger custom requests from server
+      const reqsRes = await fetch('/api/requests', { cache: 'no-store' });
+      if (reqsRes.ok) {
+        const data = await reqsRes.json();
+        if (Array.isArray(data.requests)) {
+          setPassengerRequests((prevReqs) => {
+            const reqMap = new Map<string, PassengerRideRequest>();
+            // Fresh server requests placed first
+            data.requests.forEach((r: PassengerRideRequest) => reqMap.set(r.id, r));
+            prevReqs.forEach((r) => {
+              if (!reqMap.has(r.id)) {
+                reqMap.set(r.id, r);
+              }
+            });
+            const merged = Array.from(reqMap.values());
+            try {
+              localStorage.setItem('apnisawari_requests_v1', JSON.stringify(merged));
+            } catch {}
+            return merged;
+          });
+        }
+      }
+
+      // Fetch live bookings from server
+      const bookingsRes = await fetch('/api/bookings', { cache: 'no-store' });
+      if (bookingsRes.ok) {
+        const data = await bookingsRes.json();
+        if (Array.isArray(data.bookings) && data.bookings.length > 0) {
+          setBookings((prevBookings) => {
+            const bMap = new Map<string, BookingRequest>();
+            data.bookings.forEach((b: BookingRequest) => bMap.set(b.id, b));
+            prevBookings.forEach((b) => bMap.set(b.id, b));
+            const merged = Array.from(bMap.values());
+            try {
+              localStorage.setItem('apnisawari_bookings_v1', JSON.stringify(merged));
+            } catch {}
+            return merged;
+          });
+        }
+      }
+    } catch {
+      // Safe ignore
+    }
+  }, []);
+
   // Check Supabase session on client load, restore local state, and listen to cross-tab updates
   useEffect(() => {
     setIsClientLoaded(true);
@@ -1475,72 +1553,6 @@ export default function Home() {
           if (Array.isArray(savedRequests)) setPassengerRequests(savedRequests);
         }
       } catch {}
-    };
-
-    // 4b. Real-Time Nationwide Network Sync (Across Different Browsers, Tabs & Devices)
-    const syncNetworkData = async () => {
-      if (typeof window === 'undefined') return;
-      try {
-        // Fetch live rides from server
-        const ridesRes = await fetch('/api/rides', { cache: 'no-store' });
-        if (ridesRes.ok) {
-          const data = await ridesRes.json();
-          if (Array.isArray(data.rides) && data.rides.length > 0) {
-            setRides((prevRides) => {
-              const liveMap = new Map<string, Ride>();
-              // Fresh server rides placed first
-              data.rides.forEach((r: Ride) => liveMap.set(r.id, r));
-              prevRides.forEach((r) => liveMap.set(r.id, r));
-              INITIAL_RIDES.forEach((r) => liveMap.set(r.id, r));
-
-              const merged = Array.from(liveMap.values());
-              try {
-                localStorage.setItem('apnisawari_rides_v1', JSON.stringify(merged));
-              } catch {}
-              return merged;
-            });
-          }
-        }
-
-        // Fetch live passenger custom requests from server
-        const reqsRes = await fetch('/api/requests', { cache: 'no-store' });
-        if (reqsRes.ok) {
-          const data = await reqsRes.json();
-          if (Array.isArray(data.requests)) {
-            setPassengerRequests((prevReqs) => {
-              const reqMap = new Map<string, PassengerRideRequest>();
-              // Fresh server requests placed first
-              data.requests.forEach((r: PassengerRideRequest) => reqMap.set(r.id, r));
-              prevReqs.forEach((r) => reqMap.set(r.id, r));
-              const merged = Array.from(reqMap.values());
-              try {
-                localStorage.setItem('apnisawari_requests_v1', JSON.stringify(merged));
-              } catch {}
-              return merged;
-            });
-          }
-        }
-
-        // Fetch live bookings from server
-        const bookingsRes = await fetch('/api/bookings', { cache: 'no-store' });
-        if (bookingsRes.ok) {
-          const data = await bookingsRes.json();
-          if (Array.isArray(data.bookings) && data.bookings.length > 0) {
-            setBookings((prevBookings) => {
-              const bMap = new Map<string, BookingRequest>();
-              data.bookings.forEach((b: BookingRequest) => bMap.set(b.id, b));
-              prevBookings.forEach((b) => bMap.set(b.id, b));
-              const merged = Array.from(bMap.values());
-              try {
-                localStorage.setItem('apnisawari_bookings_v1', JSON.stringify(merged));
-              } catch {}
-              return merged;
-            });
-          }
-        }
-      } catch {
-        // Safe ignore
-      }
     };
 
     // Initial instant sync
@@ -1721,18 +1733,25 @@ export default function Home() {
     });
 
     // PRIORITY SORTING:
-    // Freshly offered rides rise to the top immediately; followed by proximity to user's city
+    // 1. Available rides before sold-out rides
+    // 2. Freshly published rides rise to the top
+    // 3. Proximity to passenger city
     return [...filtered].sort((a, b) => {
+      // 1. Available rides with open seats always precede fully booked/sold-out rides
+      const aFull = (a.capacity - (a.bookedSeatsCount || 0)) <= 0 ? 1 : 0;
+      const bFull = (b.capacity - (b.bookedSeatsCount || 0)) <= 0 ? 1 : 0;
+      if (aFull !== bFull) return aFull - bFull;
+
       const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
       const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
 
-      // 1. If one ride is significantly newer (e.g. freshly published today vs older baseline data)
+      // 2. If one ride is significantly newer (e.g. freshly published today vs older baseline data)
       const dayDiff = Math.abs(bTime - aTime);
       if (dayDiff > 1000 * 60 * 60 * 24) {
         return bTime - aTime;
       }
 
-      // 2. Proximity to passenger's city when browsing All Pakistan
+      // 3. Proximity to passenger's city when browsing All Pakistan
       if (searchOrigin === 'ALL') {
         const aMatchesOrigin = userCityId && a.originLocationId === userCityId ? 1 : 0;
         const bMatchesOrigin = userCityId && b.originLocationId === userCityId ? 1 : 0;
@@ -2056,7 +2075,18 @@ export default function Home() {
           seatPrice: Number(postSeatPrice),
           notes: postNotes,
         }),
-      }).catch(() => {});
+      })
+        .then(async (res) => {
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            console.error('Failed to persist ride to server:', errData);
+          } else {
+            syncNetworkData();
+          }
+        })
+        .catch((err) => {
+          console.error('Network error publishing ride:', err);
+        });
     }
 
     const oName = NATIONWIDE_CITIES.find((c) => c.id === postOrigin)?.name || 'Origin';
@@ -4034,7 +4064,13 @@ export default function Home() {
                       const depDate = new Date(ride.departureTime);
                       const timeStr = isNaN(depDate.getTime()) ? '07:00 AM' : depDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
                       const dateStr = isNaN(depDate.getTime()) ? '' : depDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                      const isFreshlyPublished = Boolean(clientMountTime && ride.createdAt && (clientMountTime - new Date(ride.createdAt).getTime()) < 1000 * 60 * 60 * 48);
+                      const isFreshlyPublished = Boolean(
+                        clientMountTime &&
+                        ride.createdAt &&
+                        !isFull &&
+                        ride.status === 'PUBLISHED' &&
+                        (clientMountTime - new Date(ride.createdAt).getTime()) < 1000 * 60 * 60 * 2
+                      );
 
                       return (
                         <div

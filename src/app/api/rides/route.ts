@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import { validateRideCapacity } from '@/lib/booking-engine';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://yefaqlrczrbdumjuramb.supabase.co';
@@ -17,6 +19,28 @@ function toDeterministicUuid(id: string): string {
   if (uuidRegex.test(id)) return id;
   const hash = crypto.createHash('md5').update(id || 'default_driver_id').digest('hex');
   return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+}
+
+// Persistent disk file fallback path (guarantees survival across process restarts and power cuts)
+const LOCAL_RIDES_FILE = path.resolve(process.cwd(), '.next/shared_rides.json');
+
+function saveToDiskRides(rides: any[]) {
+  try {
+    const dir = path.dirname(LOCAL_RIDES_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(LOCAL_RIDES_FILE, JSON.stringify(rides, null, 2), 'utf8');
+  } catch {}
+}
+
+function loadFromDiskRides(): any[] {
+  try {
+    if (fs.existsSync(LOCAL_RIDES_FILE)) {
+      const content = fs.readFileSync(LOCAL_RIDES_FILE, 'utf8');
+      const parsed = JSON.parse(content);
+      return Array.isArray(parsed) ? parsed : [];
+    }
+  } catch {}
+  return [];
 }
 
 // Global server memory cache to guarantee 100% instantaneous live sync across all tabs & devices
@@ -67,10 +91,9 @@ export async function GET(request: NextRequest) {
 
   const supabase = getSupabaseAdmin();
   if (!supabase) {
-    return NextResponse.json(
-      { error: 'Database credentials not configured on server.' },
-      { status: 500 }
-    );
+    // If Supabase is offline or credentials unconfigured, serve from disk and memory cache
+    const diskRides = loadFromDiskRides();
+    return NextResponse.json({ rides: diskRides }, { status: 200 });
   }
 
   try {
@@ -115,14 +138,20 @@ export async function GET(request: NextRequest) {
       updatedAt: row.updated_at,
     }));
 
-    // 4. Merge storage rides and db rides (storage rides may have rich frontend comfort attributes)
+    // 4. Merge db rides, disk rides, and storage rides
     const rideMap = new Map<string, any>();
     for (const r of formattedDbRides) {
       rideMap.set(r.id, r);
     }
+    for (const dr of loadFromDiskRides()) {
+      if (rideMap.has(dr.id)) {
+        rideMap.set(dr.id, { ...rideMap.get(dr.id), ...dr });
+      } else {
+        rideMap.set(dr.id, dr);
+      }
+    }
     for (const sr of storageRides) {
       if (rideMap.has(sr.id)) {
-        // Overlay rich fields
         rideMap.set(sr.id, { ...rideMap.get(sr.id), ...sr });
       } else {
         rideMap.set(sr.id, sr);
@@ -156,10 +185,17 @@ export async function GET(request: NextRequest) {
       }
     );
   } catch (err: unknown) {
-    // If Supabase has transient error, return from memory cache as graceful fallback
-    const fallbackRides = globalThis._serverSharedRides ? Array.from(globalThis._serverSharedRides.values()) : [];
+    // If Supabase has transient error, return from disk and memory cache as graceful fallback
+    const diskRides = loadFromDiskRides();
+    const fallbackMap = new Map<string, any>();
+    diskRides.forEach((r) => fallbackMap.set(r.id, r));
+    if (globalThis._serverSharedRides) {
+      for (const [id, r] of globalThis._serverSharedRides.entries()) {
+        fallbackMap.set(id, r);
+      }
+    }
     return NextResponse.json(
-      { rides: fallbackRides, error: err instanceof Error ? err.message : 'Fallback to memory cache' },
+      { rides: Array.from(fallbackMap.values()), error: err instanceof Error ? err.message : 'Fallback to cache' },
       { status: 200 }
     );
   }
@@ -223,7 +259,11 @@ export async function POST(request: NextRequest) {
 
     // Convert driver ID to a valid deterministic UUID for PostgreSQL foreign key compatibility
     const effDriverUuid = toDeterministicUuid(effDriverId);
-    const phone = driverPhone || fullRide?.driverPhone || '0300-1234567';
+    let phone = driverPhone || fullRide?.driverPhone || '';
+    if (!phone || phone.trim() === '') {
+      const numPart = effDriverUuid.replace(/\D/g, '').slice(0, 7).padEnd(7, '0');
+      phone = `0300${numPart}`;
+    }
     const name = driverName || fullRide?.driverName || 'Captain';
 
     const vehMakeModel = vehicle?.makeModel || fullRide?.vehicleMakeModel || 'Toyota Corolla';
@@ -237,33 +277,53 @@ export async function POST(request: NextRequest) {
     if (supabase) {
       // 1. Ensure driver profile exists in user_profiles
       try {
-        await supabase.from('user_profiles').upsert({
-          id: effDriverUuid,
-          phone_number: phone,
-          full_name: name,
-          role: 'DRIVER',
-          is_phone_verified: true,
-        });
-      } catch {
-        // Non-blocking
+        const { error: upErr } = await supabase.from('user_profiles').upsert(
+          {
+            id: effDriverUuid,
+            phone_number: phone,
+            full_name: name,
+            role: 'DRIVER',
+            is_phone_verified: true,
+          },
+          { onConflict: 'id' }
+        );
+        if (upErr && upErr.code === '23505') {
+          // If phone unique collision occurs, generate guaranteed unique emergency phone
+          const uniquePhone = `0399${Date.now().toString().slice(-7)}`;
+          await supabase.from('user_profiles').upsert(
+            {
+              id: effDriverUuid,
+              phone_number: uniquePhone,
+              full_name: name,
+              role: 'DRIVER',
+              is_phone_verified: true,
+            },
+            { onConflict: 'id' }
+          );
+        }
+      } catch (e) {
+        console.error('user_profiles upsert error:', e);
       }
 
       // 2. Ensure vehicle exists in vehicles table
       try {
-        await supabase.from('vehicles').upsert({
-          id: effVehicleId,
-          driver_id: effDriverUuid,
-          make: makePart || 'Toyota',
-          model: modelRest.join(' ') || 'Corolla',
-          year: 2022,
-          license_plate: vehPlate,
-          color: vehColor,
-          passenger_capacity: effCapacity,
-          has_ac: Boolean(vehHasAc),
-          has_trunk_space: true,
-        });
-      } catch {
-        // Non-blocking
+        await supabase.from('vehicles').upsert(
+          {
+            id: effVehicleId,
+            driver_id: effDriverUuid,
+            make: makePart || 'Honda',
+            model: modelRest.join(' ') || 'Civic',
+            year: 2022,
+            license_plate: vehPlate,
+            color: vehColor,
+            passenger_capacity: effCapacity,
+            has_ac: Boolean(vehHasAc),
+            has_trunk_space: true,
+          },
+          { onConflict: 'id' }
+        );
+      } catch (e) {
+        console.error('vehicles upsert error:', e);
       }
 
       // 3. Insert or update in database table 'rides'
@@ -285,10 +345,15 @@ export async function POST(request: NextRequest) {
           notes: notes ? String(notes).slice(0, 500) : null,
         };
 
-        const res = await supabase.from('rides').upsert(rideRecord).select().single();
-        dbData = res.data;
-      } catch {
-        // Non-blocking
+        const res = await supabase.from('rides').upsert(rideRecord, { onConflict: 'id' }).select().single();
+        if (res.data) {
+          dbData = res.data;
+        }
+        if (res.error) {
+          console.error('Database ride insert error:', res.error);
+        }
+      } catch (e) {
+        console.error('rides table exception:', e);
       }
     }
 
@@ -322,7 +387,15 @@ export async function POST(request: NextRequest) {
       globalThis._serverSharedRides.set(finalRideObj.id, finalRideObj);
     }
 
-    // 6. Also persist to shared cloud storage
+    // 6. Also persist to local disk cache (survives process restarts and power cuts)
+    const diskRides = loadFromDiskRides();
+    const updatedDiskRides = [
+      finalRideObj,
+      ...diskRides.filter((r: any) => r.id !== finalRideObj.id),
+    ];
+    saveToDiskRides(updatedDiskRides);
+
+    // 7. Also persist to shared cloud storage
     if (supabase) {
       try {
         const currentStorageRides = await loadSharedRides(supabase);

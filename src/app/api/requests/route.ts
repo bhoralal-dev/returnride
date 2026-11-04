@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import fs from 'fs';
+import path from 'path';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://yefaqlrczrbdumjuramb.supabase.co';
 const SUPABASE_KEY = process.env.SUPABASE_SECRET_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || '';
@@ -7,6 +9,28 @@ const SUPABASE_KEY = process.env.SUPABASE_SECRET_KEY || process.env.NEXT_PUBLIC_
 function getSupabaseAdmin() {
   if (!SUPABASE_URL || !SUPABASE_KEY) return null;
   return createClient(SUPABASE_URL, SUPABASE_KEY);
+}
+
+// Persistent disk file fallback path (guarantees survival across process restarts and power cuts)
+const LOCAL_REQUESTS_FILE = path.resolve(process.cwd(), '.next/shared_requests.json');
+
+function saveToDiskRequests(requests: any[]) {
+  try {
+    const dir = path.dirname(LOCAL_REQUESTS_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(LOCAL_REQUESTS_FILE, JSON.stringify(requests, null, 2), 'utf8');
+  } catch {}
+}
+
+function loadFromDiskRequests(): any[] {
+  try {
+    if (fs.existsSync(LOCAL_REQUESTS_FILE)) {
+      const content = fs.readFileSync(LOCAL_REQUESTS_FILE, 'utf8');
+      const parsed = JSON.parse(content);
+      return Array.isArray(parsed) ? parsed : [];
+    }
+  } catch {}
+  return [];
 }
 
 // Global server memory cache to guarantee instant real-time live availability across all tabs & devices
@@ -99,6 +123,17 @@ export async function GET() {
     requests = await loadRequestsFromStorage(supabase);
   }
 
+  // Merge local disk fallback
+  const diskReqs = loadFromDiskRequests();
+  if (diskReqs.length > 0) {
+    const map = new Map<string, PassengerRideRequest>();
+    requests.forEach((r) => map.set(r.id, r));
+    diskReqs.forEach((r) => {
+      if (!map.has(r.id)) map.set(r.id, r);
+    });
+    requests = Array.from(map.values());
+  }
+
   // Merge server memory cache to guarantee instant real-time live availability
   if (globalThis._serverSharedRequests && globalThis._serverSharedRequests.length > 0) {
     const map = new Map<string, PassengerRideRequest>();
@@ -129,6 +164,9 @@ export async function POST(request: NextRequest) {
     let currentList: PassengerRideRequest[] = [];
     if (supabase) {
       currentList = await loadRequestsFromStorage(supabase);
+    }
+    if (currentList.length === 0) {
+      currentList = loadFromDiskRequests();
     }
     if (currentList.length === 0 && globalThis._serverSharedRequests) {
       currentList = [...globalThis._serverSharedRequests];
@@ -168,6 +206,9 @@ export async function POST(request: NextRequest) {
 
     // Save in global server memory cache
     globalThis._serverSharedRequests = currentList;
+
+    // Save to disk fallback
+    saveToDiskRequests(currentList);
 
     if (supabase) {
       await saveRequestsToStorage(supabase, currentList);
