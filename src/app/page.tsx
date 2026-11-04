@@ -639,6 +639,21 @@ export default function Home() {
   const [showCompleteRideModal, setShowCompleteRideModal] = useState<BookingRequest | null>(null);
   const [completeRideConfirmedCash, setCompleteRideConfirmedCash] = useState<boolean>(false);
 
+  // Passenger Journey Completion & Safe Arrival State
+  const [showPassengerCompleteModal, setShowPassengerCompleteModal] = useState<{
+    type: 'BOOKING' | 'SAWARI_REQUEST';
+    booking?: BookingRequest;
+    request?: PassengerRideRequest;
+    driverName: string;
+    driverPhone: string;
+    originName: string;
+    destName: string;
+    totalCash: number;
+    vehicleName?: string;
+    vehiclePlate?: string;
+  } | null>(null);
+  const [passengerConfirmedArrival, setPassengerConfirmedArrival] = useState<boolean>(false);
+
   // Passenger Celebration & 5-Star Rating State
   const [showPassengerCelebrationModal, setShowPassengerCelebrationModal] = useState<PassengerCelebrationState | null>(null);
 
@@ -802,6 +817,76 @@ export default function Home() {
       type: 'success',
       title: 'Journey Safely Completed',
       message: 'Cash of Rs. ' + b.totalPrice.toLocaleString() + ' confirmed. Captain reliability score boosted +15 pts!',
+    });
+  };
+
+  // Safe Journey Completion & Safe Arrival Confirmation for Passenger
+  const handleConfirmPassengerSafeArrival = () => {
+    if (!showPassengerCompleteModal) return;
+    const item = showPassengerCompleteModal;
+
+    if (item.type === 'BOOKING' && item.booking) {
+      const updatedBookings = bookings.map((b) =>
+        b.id === item.booking!.id ? { ...b, status: 'COMPLETED' as BookingStatus, updatedAt: new Date().toISOString() } : b
+      );
+      saveBookings(updatedBookings);
+
+      const ride = rides.find((r) => r.id === item.booking!.rideId);
+      if (ride) {
+        const remainingAccepted = updatedBookings.filter(
+          (x) => x.rideId === item.booking!.rideId && x.status === 'ACCEPTED' && x.id !== item.booking!.id
+        );
+        if (remainingAccepted.length === 0 || item.booking.bookingType === 'WHOLE_CAR') {
+          const updatedRides = rides.map((r) =>
+            r.id === item.booking!.rideId ? { ...r, status: 'COMPLETED' as RideStatus } : r
+          );
+          saveRides(updatedRides);
+        }
+      }
+
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+        try {
+          const bc = new BroadcastChannel('apnisawari_sync_channel');
+          bc.postMessage({ type: 'TRIP_COMPLETED', payload: item.booking });
+          bc.close();
+        } catch {}
+      }
+    } else if (item.type === 'SAWARI_REQUEST' && item.request) {
+      const updatedReqs: PassengerRideRequest[] = passengerRequests.map((r) =>
+        r.id === item.request!.id ? { ...r, status: 'FULFILLED' as const } : r
+      );
+      savePassengerRequests(updatedReqs);
+
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+        try {
+          const bc = new BroadcastChannel('apnisawari_sync_channel');
+          bc.postMessage({ type: 'SAWARI_COMPLETED', payload: item.request });
+          bc.close();
+        } catch {}
+      }
+    }
+
+    setShowPassengerCompleteModal(null);
+    setPassengerConfirmedArrival(false);
+
+    // Prompt passenger with driver 5-star rating & celebration modal
+    setShowPassengerCelebrationModal({
+      bookingId: item.booking?.id || item.request?.id || 'trip',
+      rideId: item.booking?.rideId || item.request?.id || 'ride',
+      driverName: item.driverName,
+      originCity: item.originName,
+      destinationCity: item.destName,
+      totalCash: item.totalCash,
+      rating: 5,
+      selectedTags: ['🚗 Safe Driving', '❄️ Chilled AC'],
+      reviewComment: '',
+      submitted: false,
+    });
+
+    setNotification({
+      type: 'success',
+      title: '🎉 Safe Arrival Confirmed!',
+      message: `Alhamdulillah! You have arrived safely in ${item.destName}. Trip marked completed.`,
     });
   };
 
@@ -1429,7 +1514,7 @@ export default function Home() {
         r.passengerName.toLowerCase() === currentUser.name.toLowerCase() ||
         (r.passengerPhone && currentUser.phone && r.passengerPhone === currentUser.phone)
       );
-      return isOwner && r.status === 'ACCEPTED';
+      return isOwner && (r.status === 'ACCEPTED' || r.status === 'FULFILLED');
     });
   }, [passengerRequests, currentUser]);
 
@@ -4035,11 +4120,14 @@ export default function Home() {
                       const acceptedOffer = req.offers.find((o) => o.id === req.acceptedOfferId) || req.offers[0];
                       if (!acceptedOffer) return null;
                       const driverPhone = acceptedOffer.driverPhone || '0300-1234567';
+                      const isCompleted = req.status === 'FULFILLED';
 
                       return (
                         <div
                           key={req.id}
-                          className="bg-white p-4 sm:p-5 rounded-2xl border-2 border-emerald-300 shadow-2xs space-y-3"
+                          className={`bg-white p-4 sm:p-5 rounded-2xl border-2 transition shadow-2xs space-y-3 ${
+                            isCompleted ? 'border-emerald-400 ring-2 ring-emerald-100 bg-emerald-50/10' : 'border-emerald-300'
+                          }`}
                         >
                           <div className="flex items-center justify-between">
                             <div>
@@ -4056,8 +4144,14 @@ export default function Home() {
                               </span>
                             </div>
 
-                            <span className="text-[9px] sm:text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase bg-emerald-100 text-emerald-800">
-                              ✓ Driver Confirmed
+                            <span
+                              className={`text-[9px] sm:text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase ${
+                                isCompleted
+                                  ? 'bg-emerald-700 text-white'
+                                  : 'bg-emerald-100 text-emerald-800'
+                              }`}
+                            >
+                              {isCompleted ? '✓ Journey Completed' : '✓ Driver Confirmed'}
                             </span>
                           </div>
 
@@ -4094,41 +4188,101 @@ export default function Home() {
                               </span>
                             </div>
 
-                            <div className="flex flex-col sm:flex-row items-center gap-2 pt-1">
-                              <a
-                                href={getWhatsAppUrl(
-                                  driverPhone,
-                                  `Assalam-o-Alaikum ${acceptedOffer.driverName} bhai, I am ${currentUser?.name || req.passengerName}. I confirmed your offer for ${req.originName} to ${req.destinationName} on ${req.travelDate} (${req.desiredTime}). Please coordinate my pickup time and location!`
-                                )}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="w-full sm:flex-1 bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 shadow-2xs"
-                              >
-                                <span>💬</span>
-                                <span>WhatsApp Driver</span>
-                              </a>
+                            {/* Safe Journey Completion Action Bar */}
+                            {!isCompleted ? (
+                              <div className="space-y-2 pt-1 border-t border-emerald-200/80">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPassengerConfirmedArrival(false);
+                                    setShowPassengerCompleteModal({
+                                      type: 'SAWARI_REQUEST',
+                                      request: req,
+                                      driverName: acceptedOffer.driverName,
+                                      driverPhone,
+                                      originName: req.originName,
+                                      destName: req.destinationName,
+                                      totalCash: acceptedOffer.offeredPrice,
+                                      vehicleName: acceptedOffer.vehicleMakeModel,
+                                      vehiclePlate: acceptedOffer.vehiclePlate,
+                                    });
+                                  }}
+                                  className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs sm:text-sm py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 shadow-xs cursor-pointer"
+                                >
+                                  <span>✅</span>
+                                  <span>Safely Arrived • Mark Drive Completed</span>
+                                </button>
 
-                              <a
-                                href={getCallUrl(driverPhone)}
-                                className="w-full sm:flex-1 bg-slate-900 hover:bg-black text-white font-black text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 shadow-2xs"
-                              >
-                                <span>📞</span>
-                                <span>Call Driver</span>
-                              </a>
+                                <div className="flex flex-col sm:flex-row items-center gap-2">
+                                  <a
+                                    href={getWhatsAppUrl(
+                                      driverPhone,
+                                      `Assalam-o-Alaikum ${acceptedOffer.driverName} bhai, I am ${currentUser?.name || req.passengerName}. I confirmed your offer for ${req.originName} to ${req.destinationName} on ${req.travelDate} (${req.desiredTime}). Please coordinate my pickup time and location!`
+                                    )}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="w-full sm:flex-1 bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 font-black text-xs py-2 px-3 rounded-xl transition flex items-center justify-center gap-1.5 shadow-2xs"
+                                  >
+                                    <span>💬</span>
+                                    <span>WhatsApp Driver</span>
+                                  </a>
 
-                              <a
-                                href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
-                                  `Assalam-o-Alaikum! I am traveling via Apni Sawari.\nRoute: ${req.originName} to ${req.destinationName}\nDriver: ${acceptedOffer.driverName} (${driverPhone})\nCar: ${acceptedOffer.vehicleMakeModel} (${acceptedOffer.vehiclePlate})\nDeparture: ${req.travelDate} (${req.desiredTime})\nFare: Rs. ${acceptedOffer.offeredPrice.toLocaleString()}\nTrack my journey safely!`
-                                )}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="w-full sm:w-auto bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1 shadow-2xs"
-                                title="Share complete driver & car details with family for safety"
-                              >
-                                <span>🛡️</span>
-                                <span>Share with Family</span>
-                              </a>
-                            </div>
+                                  <a
+                                    href={getCallUrl(driverPhone)}
+                                    className="w-full sm:flex-1 bg-slate-900 hover:bg-black text-white font-black text-xs py-2 px-3 rounded-xl transition flex items-center justify-center gap-1.5 shadow-2xs"
+                                  >
+                                    <span>📞</span>
+                                    <span>Call Driver</span>
+                                  </a>
+
+                                  <a
+                                    href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
+                                      `Assalam-o-Alaikum! I am traveling via Apni Sawari.\nRoute: ${req.originName} to ${req.destinationName}\nDriver: ${acceptedOffer.driverName} (${driverPhone})\nCar: ${acceptedOffer.vehicleMakeModel} (${acceptedOffer.vehiclePlate})\nDeparture: ${req.travelDate} (${req.desiredTime})\nFare: Rs. ${acceptedOffer.offeredPrice.toLocaleString()}\nTrack my journey safely!`
+                                    )}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="w-full sm:w-auto bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs py-2 px-3 rounded-xl transition flex items-center justify-center gap-1 shadow-2xs"
+                                    title="Share complete driver & car details with family for safety"
+                                  >
+                                    <span>🛡️</span>
+                                    <span>Share with Family</span>
+                                  </a>
+                                </div>
+                              </div>
+                            ) : (
+                              /* Completed Voucher State */
+                              <div className="bg-emerald-100/90 border border-emerald-300 p-3 rounded-xl flex items-center justify-between gap-3">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xl">🎉</span>
+                                  <div>
+                                    <div className="text-xs font-black text-emerald-950">Journey Safely Completed</div>
+                                    <div className="text-[11px] text-emerald-800">
+                                      Rs. {acceptedOffer.offeredPrice.toLocaleString()} Cash Paid to Captain {acceptedOffer.driverName}
+                                    </div>
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setShowPassengerCelebrationModal({
+                                      bookingId: req.id,
+                                      rideId: req.id,
+                                      driverName: acceptedOffer.driverName,
+                                      originCity: req.originName,
+                                      destinationCity: req.destinationName,
+                                      totalCash: acceptedOffer.offeredPrice,
+                                      rating: 5,
+                                      selectedTags: ['🚗 Safe Driving', '❄️ Chilled AC'],
+                                      reviewComment: '',
+                                      submitted: false,
+                                    });
+                                  }}
+                                  className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs py-1.5 px-3 rounded-lg shadow-2xs cursor-pointer"
+                                >
+                                  ⭐ Rate Captain
+                                </button>
+                              </div>
+                            )}
                           </div>
                         </div>
                       );
@@ -4270,7 +4424,29 @@ export default function Home() {
                               </div>
 
                               {/* In-App Live Connect Suite for Passenger */}
-                              <div className="space-y-2 pt-1">
+                              <div className="space-y-2 pt-1 border-t border-emerald-200/80">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPassengerConfirmedArrival(false);
+                                    setShowPassengerCompleteModal({
+                                      type: 'BOOKING',
+                                      booking: b,
+                                      driverName: driverDisplayName,
+                                      driverPhone,
+                                      originName: oName || 'Origin',
+                                      destName: dName || 'Destination',
+                                      totalCash: b.totalPrice,
+                                      vehicleName: vehicleModel,
+                                      vehiclePlate: vehiclePlate,
+                                    });
+                                  }}
+                                  className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs sm:text-sm py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 shadow-xs cursor-pointer"
+                                >
+                                  <span>✅</span>
+                                  <span>Safely Arrived • Mark Drive Completed</span>
+                                </button>
+
                                 <div className="flex flex-wrap items-center gap-2">
                                   <button
                                     type="button"
@@ -4945,13 +5121,14 @@ export default function Home() {
                   const myOffer = req.offers.find((o) => o.driverId === currentUser?.id);
                   const alreadyOffered = Boolean(myOffer);
                   const isAcceptedByMe = req.status === 'ACCEPTED' && req.acceptedOfferId === myOffer?.id;
+                  const isFulfilledByMe = req.status === 'FULFILLED' && req.acceptedOfferId === myOffer?.id;
                   const passengerPhone = req.passengerPhone || '0300-1234567';
 
                   return (
                     <div
                       key={req.id}
                       className={`bg-white p-4 sm:p-5 rounded-2xl border transition shadow-2xs space-y-3 ${
-                        isAcceptedByMe ? 'border-emerald-400 ring-2 ring-emerald-100' : 'border-slate-200'
+                        isAcceptedByMe ? 'border-emerald-400 ring-2 ring-emerald-100' : isFulfilledByMe ? 'border-emerald-500 bg-emerald-50/15' : 'border-slate-200'
                       }`}
                     >
                       <div className="flex items-start justify-between">
@@ -4967,6 +5144,10 @@ export default function Home() {
                               {isAcceptedByMe ? (
                                 <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded-full">
                                   ✓ Deal Confirmed
+                                </span>
+                              ) : isFulfilledByMe ? (
+                                <span className="bg-emerald-700 text-white text-[10px] font-black px-2 py-0.5 rounded-full">
+                                  ✓ Trip Completed
                                 </span>
                               ) : req.status === 'ACCEPTED' ? (
                                 <span className="bg-slate-100 text-slate-600 text-[10px] font-bold px-2 py-0.5 rounded-full">
@@ -5015,7 +5196,22 @@ export default function Home() {
                       )}
 
                       {/* IF PASSENGER CONFIRMED THIS DRIVER'S QUOTE */}
-                      {isAcceptedByMe ? (
+                      {isFulfilledByMe ? (
+                        <div className="bg-emerald-100/80 border border-emerald-300 p-3.5 rounded-xl flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xl">🎉</span>
+                            <div>
+                              <span className="text-xs font-black text-emerald-950 block">Trip Safely Completed</span>
+                              <span className="text-[11px] text-emerald-800 font-medium">
+                                Cash Collected: Rs. {myOffer?.offeredPrice.toLocaleString()} from {req.passengerName}
+                              </span>
+                            </div>
+                          </div>
+                          <span className="bg-emerald-700 text-white text-[10px] font-black px-2.5 py-1 rounded-full uppercase">
+                            ✓ COMPLETED
+                          </span>
+                        </div>
+                      ) : isAcceptedByMe ? (
                         <div className="bg-emerald-50 text-emerald-950 p-3.5 rounded-xl border border-emerald-200 space-y-2.5">
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
                             <div>
@@ -5031,26 +5227,47 @@ export default function Home() {
                             </span>
                           </div>
 
-                          <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-emerald-200/80">
-                            <a
-                              href={getWhatsAppUrl(
-                                passengerPhone,
-                                `Assalam-o-Alaikum ${req.passengerName}! I am your driver (${currentUser?.name || 'Driver'}). You confirmed my quote of Rs. ${myOffer?.offeredPrice.toLocaleString()} for ${oName} to ${dName} on ${req.travelDate} (${req.desiredTime}). My car is ${currentUser?.vehicle?.makeModel || 'Car'} (${currentUser?.vehicle?.plate || ''}). Please share your exact pickup landmark!`
-                              )}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="flex-1 min-w-[140px] bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-2 px-3 rounded-lg transition flex items-center justify-center gap-1.5 shadow-2xs"
+                          <div className="space-y-2 pt-1 border-t border-emerald-200/80">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updatedReqs: PassengerRideRequest[] = passengerRequests.map((r) =>
+                                  r.id === req.id ? { ...r, status: 'FULFILLED' as const } : r
+                                );
+                                savePassengerRequests(updatedReqs);
+                                setNotification({
+                                  type: 'success',
+                                  title: 'Trip Safely Completed',
+                                  message: `Cash of Rs. ${myOffer?.offeredPrice.toLocaleString()} recorded. Captain reliability score boosted +15 pts!`,
+                                });
+                              }}
+                              className="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs py-2 px-3 rounded-xl transition flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
                             >
-                              <span>💬</span>
-                              <span>WhatsApp Passenger</span>
-                            </a>
-                            <a
-                              href={getCallUrl(passengerPhone)}
-                              className="flex-1 min-w-[120px] bg-slate-900 hover:bg-black text-white font-black text-xs py-2 px-3 rounded-lg transition flex items-center justify-center gap-1.5 shadow-2xs"
-                            >
-                              <span>📞</span>
-                              <span>Call {passengerPhone}</span>
-                            </a>
+                              <span>🏁</span>
+                              <span>Complete Trip &amp; Record Cash (Rs. {myOffer?.offeredPrice.toLocaleString()})</span>
+                            </button>
+
+                            <div className="flex flex-wrap items-center gap-2">
+                              <a
+                                href={getWhatsAppUrl(
+                                  passengerPhone,
+                                  `Assalam-o-Alaikum ${req.passengerName}! I am your driver (${currentUser?.name || 'Driver'}). You confirmed my quote of Rs. ${myOffer?.offeredPrice.toLocaleString()} for ${oName} to ${dName} on ${req.travelDate} (${req.desiredTime}). My car is ${currentUser?.vehicle?.makeModel || 'Car'} (${currentUser?.vehicle?.plate || ''}). Please share your exact pickup landmark!`
+                                )}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex-1 min-w-[140px] bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs py-2 px-3 rounded-lg transition flex items-center justify-center gap-1.5 shadow-2xs"
+                              >
+                                <span>💬</span>
+                                <span>WhatsApp Passenger</span>
+                              </a>
+                              <a
+                                href={getCallUrl(passengerPhone)}
+                                className="flex-1 min-w-[120px] bg-slate-900 hover:bg-black text-white font-black text-xs py-2 px-3 rounded-lg transition flex items-center justify-center gap-1.5 shadow-2xs"
+                              >
+                                <span>📞</span>
+                                <span>Call {passengerPhone}</span>
+                              </a>
+                            </div>
                           </div>
                         </div>
                       ) : alreadyOffered ? (
@@ -7576,6 +7793,98 @@ export default function Home() {
                 className="flex-1 py-2.5 px-4 rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-200 text-white disabled:text-slate-400 font-black text-xs transition cursor-pointer shadow-xs disabled:cursor-not-allowed"
               >
                 Confirm &amp; Record Cash
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 10B: PASSENGER CONFIRM SAFE ARRIVAL & DRIVE COMPLETION */}
+      {showPassengerCompleteModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white w-full max-w-md rounded-2xl sm:rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <span className="w-10 h-10 rounded-2xl bg-emerald-600 text-white flex items-center justify-center text-xl font-black shadow-xs">
+                  🏁
+                </span>
+                <div>
+                  <h3 className="text-base font-black text-slate-900">Confirm Safe Arrival</h3>
+                  <p className="text-xs text-slate-500">Apni Sawari Passenger Arrival Gate</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPassengerCompleteModal(null)}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center text-sm font-bold cursor-pointer transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Route & Driver Info */}
+            <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-extrabold text-slate-900 text-sm">
+                  {showPassengerCompleteModal.originName} ➔ {showPassengerCompleteModal.destName}
+                </span>
+                <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                  Verified Trip
+                </span>
+              </div>
+              <div className="text-slate-600 space-y-0.5">
+                <div className="flex items-center gap-1.5 font-bold text-slate-800">
+                  <span>👤 Captain:</span>
+                  <span>{showPassengerCompleteModal.driverName}</span>
+                </div>
+                {showPassengerCompleteModal.vehicleName && (
+                  <div className="text-[11px] text-slate-500">
+                    🚘 {showPassengerCompleteModal.vehicleName} ({showPassengerCompleteModal.vehiclePlate || 'Verified'})
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Cash Paid Card */}
+            <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl text-center space-y-1">
+              <span className="text-xs font-bold text-emerald-800 uppercase tracking-wide">Agreed Cash Fare</span>
+              <div className="text-2xl sm:text-3xl font-black text-emerald-950">
+                Rs. {showPassengerCompleteModal.totalCash.toLocaleString()}
+              </div>
+              <p className="text-[11px] text-emerald-700">
+                Direct cash handed to Captain {showPassengerCompleteModal.driverName}
+              </p>
+            </div>
+
+            {/* Safe Arrival Checkbox */}
+            <label className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={passengerConfirmedArrival}
+                onChange={(e) => setPassengerConfirmedArrival(e.target.checked)}
+                className="mt-0.5 rounded text-emerald-600 focus:ring-emerald-500"
+              />
+              <span>
+                Alhamdulillah, I have safely reached my destination in <strong className="text-slate-900">{showPassengerCompleteModal.destName}</strong> and handed <strong className="text-slate-900">Rs. {showPassengerCompleteModal.totalCash.toLocaleString()}</strong> cash to Captain {showPassengerCompleteModal.driverName}.
+              </span>
+            </label>
+
+            {/* Action Buttons */}
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setShowPassengerCompleteModal(null)}
+                className="flex-1 py-2.5 px-4 rounded-xl border border-slate-200 text-slate-700 font-bold text-xs hover:bg-slate-50 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!passengerConfirmedArrival}
+                onClick={handleConfirmPassengerSafeArrival}
+                className="flex-1 py-2.5 px-4 rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-200 text-white disabled:text-slate-400 font-black text-xs transition cursor-pointer shadow-xs disabled:cursor-not-allowed"
+              >
+                Confirm Arrival &amp; Rate
               </button>
             </div>
           </div>
